@@ -36,11 +36,15 @@ cd /opt/memetrading
 bash scripts/deploy_vps.sh
 ```
 
-Open:
+For security, the dashboard is bound to localhost on the VPS. From your Mac,
+open an SSH tunnel in a separate terminal:
 
-```text
-http://<vps-ip>:8501
+```bash
+ssh -N -L 8501:127.0.0.1:8501 deploy@<vps-ip>
 ```
+
+Then open `http://127.0.0.1:8501` in your Mac browser. Do not expose port
+`8501` publicly just to view the dashboard.
 
 For the first Telegram login, run the collector interactively:
 
@@ -117,7 +121,10 @@ Suggested cron:
 - Real trading remains disabled in v1.
 - `DRY_RUN=true` should stay enabled.
 - Do not set or store private keys for this version.
-- Keep firewall access to Streamlit restricted to your IP or tunnel it over SSH.
+- Streamlit binds to VPS localhost by default; access it through an SSH tunnel.
+- Docker published ports can bypass uncomplicated firewall (`ufw`) rules, so do
+  not change the dashboard port binding to `8501:8501` without another access
+  control layer.
 - Run exactly one `memetrading-pipeline` instance so the DexScreener request budget and fast paper-position observations remain singular.
 - Leave raw snapshot payload storage disabled unless temporary API diagnostics require it.
 - See `docs/GITHUB_DEPLOYMENT.md` for the GitHub pull-based workflow.

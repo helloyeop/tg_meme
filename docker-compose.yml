@@ -40,7 +40,7 @@ services:
     command: ["streamlit", "run", "src/dashboard/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
     restart: unless-stopped
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     volumes:
       - ./data:/app/data
       - ./sessions:/app/sessions

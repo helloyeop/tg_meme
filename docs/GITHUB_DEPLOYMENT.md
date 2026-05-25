@@ -68,6 +68,14 @@ docker compose up -d collector pipeline dashboard
 ```
 
 The interactive collector run creates the Telethon session under `sessions/`.
+The dashboard is intentionally available only on the VPS loopback address. From
+your Mac, connect with:
+
+```bash
+ssh -N -L 8501:127.0.0.1:8501 deploy@<vps-ip>
+```
+
+Then browse to `http://127.0.0.1:8501`.
 
 ## Repeated Manual Deploy
 

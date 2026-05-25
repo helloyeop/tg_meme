@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/memetrading
 EnvironmentFile=/opt/memetrading/.env
-ExecStart=/opt/memetrading/.venv/bin/streamlit run src/dashboard/streamlit_app.py --server.address=0.0.0.0 --server.port=8501
+ExecStart=/opt/memetrading/.venv/bin/streamlit run src/dashboard/streamlit_app.py --server.address=127.0.0.1 --server.port=8501
 Restart=always
 RestartSec=10
 
