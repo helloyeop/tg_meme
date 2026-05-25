@@ -1,7 +1,7 @@
 paper:
   initial_balance_sol: 20
   entry_size_sol: 0.5
-  daily_max_loss_sol: 2
+  daily_max_loss_sol: 0.5
   estimated_slippage_pct: 5
   estimated_fees_pct: 1
   max_open_positions: 5
