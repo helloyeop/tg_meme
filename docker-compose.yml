@@ -1,0 +1,50 @@
+services:
+  init-db:
+    build: .
+    env_file: .env
+    command: ["python", "-m", "app.main", "--mode", "init-db"]
+    volumes:
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+      - ./config:/app/config:ro
+
+  collector:
+    build: .
+    env_file: .env
+    command: ["python", "-m", "app.main", "--mode", "collector"]
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+      - ./config:/app/config:ro
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+
+  pipeline:
+    build: .
+    env_file: .env
+    command: ["python", "-m", "app.main", "--mode", "all", "--limit", "100", "--poll-seconds", "5"]
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+      - ./config:/app/config:ro
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+
+  dashboard:
+    build: .
+    env_file: .env
+    command: ["streamlit", "run", "src/dashboard/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+      - ./config:/app/config:ro
+    depends_on:
+      init-db:
+        condition: service_completed_successfully

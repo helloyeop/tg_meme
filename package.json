@@ -1,0 +1,12 @@
+{
+  "name": "memecoin-telegram-call-bot-tools",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local Node.js tools for the memecoin Telegram call bot.",
+  "scripts": {
+    "gmgn": "gmgn-cli"
+  },
+  "dependencies": {
+    "gmgn-cli": "1.3.3"
+  }
+}

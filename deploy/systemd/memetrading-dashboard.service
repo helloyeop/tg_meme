@@ -1,0 +1,15 @@
+[Unit]
+Description=Memetrading Streamlit Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/memetrading
+EnvironmentFile=/opt/memetrading/.env
+ExecStart=/opt/memetrading/.venv/bin/streamlit run src/dashboard/streamlit_app.py --server.address=0.0.0.0 --server.port=8501
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

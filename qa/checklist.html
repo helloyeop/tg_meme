@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memecoin Telegram Call Bot QA Checklist</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f6f7f9; color: #14171a; }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    p { margin: 0 0 20px; color: #52606d; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d8dee4; }
+    th, td { border-bottom: 1px solid #d8dee4; padding: 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f6; font-size: 13px; }
+    td:first-child { width: 42px; color: #697386; }
+    select, input { width: 100%; box-sizing: border-box; padding: 7px; border: 1px solid #b8c0cc; border-radius: 6px; background: white; color: #14171a; }
+    .section td { background: #243447; color: white; font-weight: 700; }
+    .controls { display: flex; gap: 8px; margin: 18px 0; flex-wrap: wrap; }
+    button { border: 1px solid #9aa6b2; background: white; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #101418; color: #f3f5f7; }
+      p { color: #a9b4bf; }
+      table, select, input, button { background: #161c22; color: #f3f5f7; border-color: #35404a; }
+      th { background: #202933; }
+      th, td { border-color: #35404a; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Memecoin Telegram Call Bot QA Checklist</h1>
+  <p>브라우저에서 직접 기능 검수 결과를 기록하세요. 상태와 메모는 이 브라우저의 localStorage에 저장됩니다.</p>
+  <div class="controls">
+    <button type="button" onclick="save()">Save</button>
+    <button type="button" onclick="window.print()">Print</button>
+    <button type="button" onclick="resetAll()">Reset</button>
+  </div>
+  <table id="checklist">
+    <thead><tr><th>#</th><th>Area</th><th>Checklist Item</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</main>
+<script>
+const items = [
+  ["Safety", "DRY_RUN 기본값이 true이며 Settings.real_trading_enabled가 항상 false이다."],
+  ["Safety", ".env.example에 실제 private key 입력 항목이 없고 v1 코드가 private key를 요구하지 않는다."],
+  ["Database", "python -m app.main --mode init-db 실행 시 SQLite 테이블이 생성된다."],
+  ["Database", "telegram_messages, extracted_addresses, message_analysis, token_call_events, paper_positions 테이블이 존재한다."],
+  ["Telegram", "Telethon 사용자 계정 설정(TELEGRAM_API_ID/API_HASH/SESSION_NAME)으로 collector가 시작된다."],
+  ["Telegram", "config/channels.yaml에 공개 채널과 접근 가능한 비공개 채널을 함께 지정할 수 있다."],
+  ["CA Extraction", "Solana base58 32-byte mint 주소만 추출된다."],
+  ["CA Extraction", "EVM 0x 주소와 잘못된 base58 문자열은 무시된다."],
+  ["LLM", "OpenAI 키가 있으면 기본 모델 gpt-5.4-nano가 모든 메시지를 strict JSON schema로 분류한다."],
+  ["LLM", "BUY_CALL/WARNING/SOLD/TAKE_PROFIT의 낮은 confidence 결과는 gpt-5.4-mini 재검토가 가능하다."],
+  ["LLM", "message_analysis에 model, review 여부, token usage, latency가 저장되어 비용과 속도를 점검할 수 있다."],
+  ["LLM", "LLM 키가 없으면 keyword fallback으로 UNKNOWN/NOISE 계열 분석을 저장하며 파이프라인이 중단되지 않는다."],
+  ["Context", "CA만 있는 메시지 앞 60초 안에 같은 채널의 미사용 진입 문맥이 정확히 하나 있으면 LLM에 함께 전달되고 연결 기록이 저장된다."],
+  ["Context", "설명과 CA가 함께 있는 게시글은 직전 문맥을 상속하지 않으며, 30초 간격으로 여러 진입 후보가 겹치면 ambiguous로 기록되어 문맥 기반 자동 진입을 하지 않는다."],
+  ["Events", "같은 channel_id + token_address 반복 언급은 하나의 token_call_events 행으로 병합된다."],
+  ["Events", "re-entry, round 2, back in 표현도 새 이벤트를 만들지 않고 기존 이벤트 카운터를 갱신한다."],
+  ["Data Sources", "시장 데이터 조회 우선순위가 GMGN, DexScreener 순서이며 Helius는 보안/온체인 데이터에 사용된다."],
+  ["Data Sources", "외부 API 실패가 Telegram 저장과 메시지 분석을 중단시키지 않는다."],
+  ["Scoring", "intent, channel, timing, market cap position, CA count, risk factor가 final_signal_score에 반영된다."],
+  ["Scoring", "과거 discussion CA 후 새 BUY_CALL이 확인되면 first_actionable_call_time이 timing 기준이 된다."],
+  ["Paper Trading", "기본 진입 크기가 0.5 SOL이고 일일 최대 가상 손실 한도가 0.5 SOL이다."],
+  ["Paper Trading", "risk_score < 65, liquidity < 5000, warning/sold 이벤트는 신규 paper entry를 차단한다."],
+  ["Paper Trading", "진입/손익/stop loss/take profit은 market_cap_usd 변화율 기준이며 fill에도 market cap이 기록된다."],
+  ["Paper Trading", "OPEN/PARTIALLY_CLOSED 포지션은 기본 5초마다 DexScreener market cap을 다시 확인하여 급락 손절을 평가한다."],
+  ["Paper Trading", "CLOSED 포지션은 기본 15분 간격의 사후 관찰 대상으로 남으며, 같은 토큰의 최근 스냅샷이 있으면 추가 API 요청 없이 이를 재사용한다."],
+  ["API Limits", "빠른 포지션 감시는 DexScreener 공식 다중 토큰 endpoint를 사용하며 요청당 최대 30개, 앱 요청 예산 분당 240회로 제한된다."],
+  ["Storage", "시장/보안 스냅샷은 정규화 컬럼을 저장하고 대용량 raw_json 저장은 기본 비활성화된다."],
+  ["Alerts", "텔레그램 개인 봇 알림은 토큰/채팅 ID가 설정된 경우에만 outbound sendMessage를 호출한다."],
+  ["Dashboard", "streamlit run src/dashboard/streamlit_app.py로 대시보드가 열린다."],
+  ["Dashboard", "Overview, Live Messages, Context Links, Call Events, Paper Portfolio, Closed Trades, Channel Performance, Token Detail, Settings Preview 페이지가 있다."],
+  ["Dashboard", "Context Links에서 연결된 앞 메시지, CA 메시지, 시간 간격, ambiguous 판정 여부를 감사할 수 있다."],
+  ["Dashboard", "Call Events와 Paper Trading 화면에서 최초/현재 market cap과 market cap multiple을 확인할 수 있다."],
+  ["Dashboard", "Closed Trades에서 실현 손익과 사후 최저/최고/최신 market cap 기반의 보유 가상 결과를 비교할 수 있다."],
+  ["QA", "docs/QA_CHECKLIST_PROMPT.md와 qa/checklist.html이 프로젝트 기능 기준으로 존재한다."],
+  ["VPS", "환경변수와 config 파일 기반이라 로컬 절대 경로 없이 VPS로 옮길 수 있다."]
+];
+const tbody = document.querySelector("#checklist tbody");
+items.forEach((item, index) => {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${index + 1}</td><td>${item[0]}</td><td>${item[1]}</td>
+    <td><select data-key="status-${index}"><option></option><option>Pass</option><option>Fail</option><option>N/A</option></select></td>
+    <td><input data-key="note-${index}" placeholder="Evidence or issue"></td>`;
+  tbody.appendChild(tr);
+});
+function save() {
+  document.querySelectorAll("[data-key]").forEach(el => localStorage.setItem(`memetrading-qa-${el.dataset.key}`, el.value));
+}
+function load() {
+  document.querySelectorAll("[data-key]").forEach(el => el.value = localStorage.getItem(`memetrading-qa-${el.dataset.key}`) || "");
+}
+function resetAll() {
+  if (!confirm("Clear all saved checklist answers?")) return;
+  document.querySelectorAll("[data-key]").forEach(el => { localStorage.removeItem(`memetrading-qa-${el.dataset.key}`); el.value = ""; });
+}
+document.addEventListener("change", save);
+load();
+</script>
+</body>
+</html>

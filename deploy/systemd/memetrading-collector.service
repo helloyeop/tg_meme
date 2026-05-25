@@ -1,0 +1,15 @@
+[Unit]
+Description=Memetrading Telegram Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/memetrading
+EnvironmentFile=/opt/memetrading/.env
+ExecStart=/opt/memetrading/.venv/bin/python -m app.main --mode collector
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

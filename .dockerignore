@@ -1,0 +1,13 @@
+.env
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+data/
+sessions/
+node_modules/
+config/channels.yaml
+config/strategy.yaml
+*.session
+*.session-journal
+memecoin_telegram_call_bot_docs.zip

@@ -1,0 +1,10 @@
+channels:
+  - name: example_public_channel
+    identifier: "@example"
+    enabled: true
+    private: false
+
+  - name: example_private_channel
+    identifier: "https://t.me/c/0000000000/1"
+    enabled: false
+    private: true

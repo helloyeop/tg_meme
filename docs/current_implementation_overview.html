@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memetrading - Current Implementation Overview</title>
+<style>
+  :root {
+    --bg: #f3f5f7;
+    --surface: #ffffff;
+    --ink: #18232d;
+    --muted: #63717d;
+    --line: #d9e0e6;
+    --teal: #007d75;
+    --teal-soft: #e1f4f1;
+    --green: #137333;
+    --green-soft: #e7f5eb;
+    --amber: #946200;
+    --amber-soft: #fff1d6;
+    --red: #ac2f27;
+    --red-soft: #fbe7e4;
+    --blue: #1759a6;
+    --blue-soft: #e5effc;
+    --charcoal: #263440;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Arial, sans-serif;
+    font-size: 14px;
+    letter-spacing: 0;
+  }
+  .app { display: grid; grid-template-columns: 238px minmax(0, 1fr); min-height: 100vh; }
+  .nav {
+    position: sticky; top: 0; height: 100vh;
+    padding: 25px 18px; background: var(--charcoal); color: #fff;
+  }
+  .brand { font-size: 18px; font-weight: 700; line-height: 1.35; margin-bottom: 7px; }
+  .sub { color: #b6c2cc; line-height: 1.55; font-size: 12px; }
+  .nav ul { list-style: none; margin: 29px 0 0; padding: 0; }
+  .nav li { margin-bottom: 3px; }
+  .nav a {
+    display: block; padding: 10px 11px; border-radius: 6px;
+    color: #dce3e9; text-decoration: none; font-size: 13px;
+  }
+  .nav a:hover { background: #344652; color: #fff; }
+  .safety {
+    position: absolute; bottom: 22px; left: 18px; right: 18px;
+    padding: 12px; background: #31434e; border-radius: 6px; line-height: 1.55;
+  }
+  .safety strong { display: block; color: #72decf; margin-bottom: 3px; }
+  main { min-width: 0; padding: 30px 34px 46px; max-width: 1320px; }
+  header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0 0 7px; font-size: 28px; line-height: 1.25; }
+  .lead { color: var(--muted); font-size: 15px; margin: 0; line-height: 1.6; }
+  .stamp {
+    min-width: 202px; padding: 12px 14px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; color: var(--muted);
+  }
+  .stamp b { display: block; color: var(--ink); margin-top: 5px; }
+  .tags { margin-top: 16px; display: flex; gap: 7px; flex-wrap: wrap; }
+  .tag { padding: 5px 9px; border-radius: 5px; font-weight: 600; font-size: 12px; }
+  .done { background: var(--green-soft); color: var(--green); }
+  .partial { background: var(--amber-soft); color: var(--amber); }
+  .next { background: var(--blue-soft); color: var(--blue); }
+  section { margin-top: 30px; }
+  h2 { font-size: 19px; margin: 0 0 15px; }
+  h3 { font-size: 15px; margin: 0 0 10px; }
+  .metrics { display: grid; grid-template-columns: repeat(8, minmax(95px, 1fr)); gap: 9px; }
+  .metric {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    padding: 13px 12px; min-height: 78px;
+  }
+  .metric .value { font-size: 24px; font-weight: 700; color: var(--teal); margin-bottom: 5px; }
+  .metric .label { font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .band {
+    padding: 16px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .flow {
+    display: flex; align-items: stretch; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+  }
+  .node {
+    flex: 1 0 126px; min-height: 83px; padding: 12px 10px;
+    border-radius: 6px; border: 1px solid #bcded9; background: var(--teal-soft);
+  }
+  .node.dark { background: #eef2f5; border-color: var(--line); }
+  .node.blue { background: var(--blue-soft); border-color: #c2d6f0; }
+  .node.green { background: var(--green-soft); border-color: #bcdac5; }
+  .node.amber { background: var(--amber-soft); border-color: #edce91; }
+  .node b { display: block; margin-bottom: 5px; font-size: 13px; }
+  .node span { font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .arrow { display: flex; align-items: center; color: #82909a; font-size: 18px; }
+  .split {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px;
+  }
+  .decision {
+    padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .steps { display: grid; gap: 8px; }
+  .step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+  .number {
+    width: 28px; height: 28px; line-height: 28px; text-align: center;
+    border-radius: 50%; background: var(--teal); color: white; font-weight: 700;
+  }
+  .step p { margin: 3px 0 0; line-height: 1.5; color: var(--muted); }
+  .branch {
+    margin: 4px 0 0 39px; display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .branch em {
+    font-style: normal; font-size: 12px; padding: 5px 7px; border-radius: 5px;
+    background: #edf2f6; color: #465563;
+  }
+  table {
+    width: 100%; border-collapse: collapse; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+  }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e9eef2; vertical-align: top; }
+  th { background: #f7f9fa; color: #50606d; font-size: 12px; font-weight: 700; }
+  td { line-height: 1.45; }
+  tr:last-child td { border-bottom: 0; }
+  .status {
+    white-space: nowrap; display: inline-block; padding: 4px 7px;
+    border-radius: 4px; font-size: 12px; font-weight: 700;
+  }
+  .two { display: grid; grid-template-columns: 1.05fr .95fr; gap: 15px; }
+  .case { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 17px; }
+  .case-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+  .case-box { background: #f7f9fa; border-radius: 5px; padding: 10px; }
+  .case-box b { font-size: 18px; display: block; margin-top: 4px; }
+  .loss b { color: var(--red); }
+  .gain b { color: var(--green); }
+  .roadmap { display: flex; gap: 8px; overflow-x: auto; }
+  .road {
+    flex: 1; min-width: 178px; padding: 14px; background: var(--surface);
+    border-left: 4px solid var(--blue); border-radius: 5px; border-top: 1px solid var(--line);
+    border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .road b { display: block; margin-bottom: 6px; }
+  .road small { color: var(--muted); line-height: 1.5; }
+  code {
+    padding: 2px 5px; background: #eef2f5; border-radius: 4px;
+    font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px;
+  }
+  .foot {
+    margin-top: 34px; padding-top: 16px; border-top: 1px solid var(--line);
+    color: var(--muted); line-height: 1.6;
+  }
+  @media (max-width: 1040px) {
+    .app { grid-template-columns: 1fr; }
+    .nav { position: static; height: auto; }
+    .nav ul { display: flex; flex-wrap: wrap; margin-top: 15px; }
+    .safety { position: static; margin-top: 15px; }
+    main { padding: 22px 16px; }
+    .metrics { grid-template-columns: repeat(4, 1fr); }
+    .two, .split { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    header { display: block; }
+    .stamp { margin-top: 16px; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="nav">
+    <div class="brand">Memecoin Telegram<br>Call Bot</div>
+    <div class="sub">Current Implementation Overview<br>Solana Paper Trading V1</div>
+    <ul>
+      <li><a href="#snapshot">현재 현황</a></li>
+      <li><a href="#flow">전체 데이터 흐름</a></li>
+      <li><a href="#classification">메시지 판정</a></li>
+      <li><a href="#paper">페이퍼 트레이딩</a></li>
+      <li><a href="#status">기능 상태</a></li>
+      <li><a href="#case">종료 거래 사례</a></li>
+      <li><a href="#roadmap">다음 단계</a></li>
+    </ul>
+    <div class="safety">
+      <strong>Safety Boundary</strong>
+      DRY_RUN=true<br>
+      실거래 없음<br>
+      private key 미사용
+    </div>
+  </aside>
+  <main>
+    <header>
+      <div>
+        <h1>현재 개발 현황 시각 정리</h1>
+        <p class="lead">Telegram 메시지 수집부터 LLM 분류, market cap 기반 페이퍼 거래와 손절 이후 평가까지의 현재 상태입니다.</p>
+        <div class="tags">
+          <span class="tag done">구현 완료</span>
+          <span class="tag partial">부분 구현 / 연결 필요</span>
+          <span class="tag next">다음 단계</span>
+        </div>
+      </div>
+      <div class="stamp">스냅샷 기준 시각<b>2026-05-25 14:06 KST</b></div>
+    </header>
+
+    <section id="snapshot">
+      <h2>운영 스냅샷</h2>
+      <div class="metrics">
+        <div class="metric"><div class="value">613</div><div class="label">Telegram<br>messages</div></div>
+        <div class="metric"><div class="value">613</div><div class="label">LLM<br>analyses</div></div>
+        <div class="metric"><div class="value">67</div><div class="label">Solana CA<br>rows</div></div>
+        <div class="metric"><div class="value">39</div><div class="label">Call<br>events</div></div>
+        <div class="metric"><div class="value">1</div><div class="label">Open paper<br>position</div></div>
+        <div class="metric"><div class="value">1</div><div class="label">Closed paper<br>position</div></div>
+        <div class="metric"><div class="value">0</div><div class="label">Context<br>links yet</div></div>
+        <div class="metric"><div class="value">0</div><div class="label">Application<br>errors</div></div>
+      </div>
+    </section>
+
+    <section id="flow">
+      <h2>전체 데이터 흐름</h2>
+      <div class="band flow" aria-label="system flow">
+        <div class="node dark"><b>Telegram</b><span>공개/접근 가능 비공개 채널</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><b>Telethon</b><span>사용자 로그인 수집</span></div>
+        <div class="arrow">→</div>
+        <div class="node dark"><b>SQLite</b><span>원문 메시지 저장</span></div>
+        <div class="arrow">→</div>
+        <div class="node blue"><b>CA + LLM</b><span>Solana 추출, 문맥 판정</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><b>Call Event</b><span>동일 채널/CA 병합</span></div>
+        <div class="arrow">→</div>
+        <div class="node amber"><b>Market Data</b><span>GMGN, Dex, Helius</span></div>
+        <div class="arrow">→</div>
+        <div class="node green"><b>Paper</b><span>Score, 진입, 추적</span></div>
+        <div class="arrow">→</div>
+        <div class="node dark"><b>Dashboard</b><span>감사 및 전략 평가</span></div>
+      </div>
+    </section>
+
+    <section id="classification">
+      <h2>메시지에서 Call Event까지</h2>
+      <div class="split">
+        <div class="decision">
+          <h3>메시지 분류 순서도</h3>
+          <div class="steps">
+            <div class="step"><div class="number">1</div><p>Telethon이 메시지 원문과 채널 정보를 SQLite에 저장합니다.</p></div>
+            <div class="step"><div class="number">2</div><p>Solana CA만 추출하고 모든 메시지를 LLM으로 분류합니다.</p></div>
+            <div class="step"><div class="number">3</div><p>CA-only 게시물은 같은 채널의 직전 60초 action context를 검사합니다.</p></div>
+            <div class="branch">
+              <em>후보 1개: 결합 분석</em>
+              <em>후보 다수: ambiguous</em>
+              <em>자체 설명+CA: 독립 분석</em>
+            </div>
+            <div class="step"><div class="number">4</div><p>같은 채널과 같은 CA의 반복 언급은 새 이벤트가 아니라 기존 Call Event에 합쳐집니다.</p></div>
+            <div class="step"><div class="number">5</div><p>첫 실제 <code>BUY_CALL</code> 시점부터 timing score를 계산합니다.</p></div>
+          </div>
+        </div>
+        <div class="decision">
+          <h3>LLM 및 맥락 상태</h3>
+          <table>
+            <thead><tr><th>기능</th><th>현재 동작</th></tr></thead>
+            <tbody>
+              <tr><td>기본 모델</td><td>OpenAI <code>gpt-5.4-nano</code></td></tr>
+              <tr><td>중요 저신뢰 검토</td><td><code>gpt-5.4-mini</code></td></tr>
+              <tr><td>로컬 fallback</td><td>Ollama 사용 가능</td></tr>
+              <tr><td>짧은 분리 게시글</td><td>60초 단일 문맥 연결 구현</td></tr>
+              <tr><td>며칠간 토큰 서사</td><td><span class="status next">다음 단계</span> channel memory 필요</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="paper">
+      <h2>페이퍼 트레이딩 수명주기</h2>
+      <div class="band flow" aria-label="paper lifecycle">
+        <div class="node blue"><b>BUY_CALL</b><span>market cap 조회</span></div>
+        <div class="arrow">→</div>
+        <div class="node amber"><b>Entry Gate</b><span>score 55, risk 65, liquidity $5k</span></div>
+        <div class="arrow">→</div>
+        <div class="node green"><b>OPEN</b><span>기본 0.5 SOL</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><b>5 sec monitor</b><span>열린 포지션만 Dex batch</span></div>
+        <div class="arrow">→</div>
+        <div class="node red amber"><b>EXIT</b><span>-50% stop, +30/+100% 부분 익절</span></div>
+        <div class="arrow">→</div>
+        <div class="node dark"><b>CLOSED</b><span>실현 손익 저장</span></div>
+        <div class="arrow">→</div>
+        <div class="node blue"><b>Post-exit</b><span>15분, 최근 snapshot 재사용</span></div>
+      </div>
+    </section>
+
+    <section id="status">
+      <h2>구현 상태</h2>
+      <table>
+        <thead><tr><th>영역</th><th>상태</th><th>현재 내용</th></tr></thead>
+        <tbody>
+          <tr><td>Telegram 수집 / Solana CA / SQLite</td><td><span class="status done">완료</span></td><td>Telethon 사용자 로그인 수집, Solana 주소 추출, DB 저장</td></tr>
+          <tr><td>LLM 분류 / 짧은 문맥 연결</td><td><span class="status done">완료</span></td><td>OpenAI 기본, review/fallback, CA-only action context 감사 기록</td></tr>
+          <tr><td>시장 데이터 / 점수화</td><td><span class="status done">완료</span></td><td>GMGN → DexScreener, security fallback, market cap 중심 score</td></tr>
+          <tr><td>Paper trading / 모니터링</td><td><span class="status done">완료</span></td><td>진입, stop/부분 익절, 열린 5초 감시, 닫힌 15분 사후 평가</td></tr>
+          <tr><td>Streamlit / VPS 준비</td><td><span class="status done">완료</span></td><td>대시보드, QA, Docker/systemd/GitHub 배포 구조</td></tr>
+          <tr><td>Telegram 개인 봇 알림</td><td><span class="status partial">부분</span></td><td>bot client/format 모듈은 존재하나 pipeline action trigger 연결 필요</td></tr>
+          <tr><td>온체인 지갑 추적</td><td><span class="status partial">부분</span></td><td>security snapshots 10,894건 저장; wallet activity 행은 현재 0건</td></tr>
+          <tr><td>고급 exit 규칙</td><td><span class="status partial">부분</span></td><td>trailing, liquidity/major sell, max hold 설정은 있으나 실행 로직 추가 필요</td></tr>
+          <tr><td>채널별 장기 맥락</td><td><span class="status next">다음</span></td><td>Channel Profile + Active Token Threads를 shadow 방식으로 검증 권장</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="case">
+      <h2>닫힌 거래 한 건이 보여준 것</h2>
+      <div class="two">
+        <div class="case">
+          <h3>실제 종료와 사후 보유 비교</h3>
+          <div class="case-metrics">
+            <div class="case-box loss">실제 실현 PnL<b>-0.1622 SOL</b></div>
+            <div class="case-box loss">계속 보유 시 최악<b>-61.61%</b></div>
+            <div class="case-box gain">계속 보유 시 최고<b>+206.22%</b></div>
+            <div class="case-box gain">최고점 PnL<b>+1.0311 SOL</b></div>
+          </div>
+        </div>
+        <div class="case">
+          <h3>Market Cap 경로</h3>
+          <table>
+            <tbody>
+              <tr><td>사후 비교 기준</td><td>$294,782</td></tr>
+              <tr><td>손절 후 관측 최저</td><td>$119,128</td></tr>
+              <tr><td>손절 후 관측 최고</td><td>$950,179</td></tr>
+              <tr><td>해석</td><td>이 거래는 변경 전 -25% stop 사례이며, 현재 기준은 -50%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <h2>권장 개발 순서</h2>
+      <div class="roadmap">
+        <div class="road"><b>1. 사후 표본 축적</b><small>닫힌 거래의 저점, 고점, 회복시간과 재진입 결과를 모읍니다.</small></div>
+        <div class="arrow">→</div>
+        <div class="road"><b>2. Exit 완성</b><small>trailing stop과 위험 기반 청산을 실제 엔진에 붙입니다.</small></div>
+        <div class="arrow">→</div>
+        <div class="road"><b>3. Channel Memory</b><small>채널별 활성 토큰 thread를 shadow 판정으로 저장합니다.</small></div>
+        <div class="arrow">→</div>
+        <div class="road"><b>4. 전략 보정</b><small>충분한 표본 후 채널별 점수와 재진입 규칙을 조정합니다.</small></div>
+      </div>
+    </section>
+
+    <div class="foot">
+      이 문서는 현재 코드와 SQLite 운영 상태를 기준으로 작성했습니다.
+      실거래 기능은 포함하지 않으며, 장기 채널 메모리와 일부 고급 exit/alert 연결은 다음 구현 대상으로 남아 있습니다.
+      기능 검수는 <a href="../qa/checklist.html">QA Checklist</a>에서 진행할 수 있습니다.
+    </div>
+  </main>
+</div>
+</body>
+</html>

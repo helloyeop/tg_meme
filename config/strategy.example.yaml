@@ -1,0 +1,80 @@
+paper:
+  initial_balance_sol: 20
+  entry_size_sol: 0.5
+  daily_max_loss_sol: 2
+  estimated_slippage_pct: 5
+  estimated_fees_pct: 1
+  max_open_positions: 5
+  max_positions_per_channel: 2
+
+entry:
+  final_signal_score_min: 55
+  risk_score_min: 65
+  max_time_since_first_call_minutes: 5
+  max_market_cap_increase_since_first_call_pct: 150
+  min_liquidity_usd: 5000
+  no_warning_in_event: true
+  no_sold_message_in_event: true
+  no_existing_open_position_same_channel_token: true
+
+exit:
+  stop_loss_pct: -50
+  take_profit_1_pct: 30
+  take_profit_1_sell_ratio: 50
+  take_profit_2_pct: 100
+  take_profit_2_sell_ratio: 30
+  trailing_stop_after_pct: 80
+  trailing_stop_gap_pct: 25
+  force_exit_on_warning: true
+  force_exit_on_sold_message: true
+  force_exit_on_liquidity_drop: true
+  force_exit_on_major_sell: true
+  max_hold_minutes_without_profit: 30
+
+scoring:
+  new_channel_default_score: 50
+  intent_base_score:
+    BUY_CALL: 70
+    ADDING: 65
+    UPDATE_BULLISH: 55
+    WATCH: 30
+    HOLD: 25
+    DISCUSSION: 0
+    REPOST: -5
+    FLEX: -20
+    TAKE_PROFIT: -30
+    UPDATE_BEARISH: -55
+    SOLD: -80
+    WARNING: -100
+    NOISE: 0
+    UNKNOWN: 0
+  timing_factor:
+    first_1_minute: 1.00
+    1_to_3_minutes: 0.85
+    3_to_5_minutes: 0.70
+    5_to_15_minutes: 0.45
+    15_to_60_minutes: 0.25
+    over_60_minutes: 0.10
+  market_cap_position_factor:
+    below_or_equal_first_call: 1.00
+    up_0_to_30_pct: 0.90
+    up_30_to_80_pct: 0.70
+    up_80_to_150_pct: 0.45
+    up_150_to_300_pct: 0.20
+    up_over_300_pct: 0.05
+  ca_count_factor:
+    1: 1.00
+    2: 0.80
+    3: 0.65
+    4_or_more: 0.40
+  risk_penalties:
+    liquidity_under_5000_usd: 25
+    top10_holder_ratio_over_45_pct: 25
+    dev_wallet_ratio_over_5_pct: 20
+    mint_authority_active: 20
+    freeze_authority_active: 20
+    holder_count_under_80: 10
+    major_sell_detected: 25
+    liquidity_drop_detected: 40
+    missing_market_data: 15
+    missing_security_data: 10
