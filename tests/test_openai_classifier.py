@@ -90,7 +90,9 @@ def test_openai_high_confidence_result_skips_review(monkeypatch) -> None:
         def create(self, **kwargs):
             calls.append(kwargs)
             return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content=_content("BUY_CALL", 0.95)))],
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=_content("BUY_CALL", 0.95)))
+                ],
                 usage=SimpleNamespace(prompt_tokens=300, completion_tokens=150, total_tokens=450),
             )
 
@@ -109,6 +111,73 @@ def test_openai_high_confidence_result_skips_review(monkeypatch) -> None:
     assert not result.was_reviewed
 
 
+def test_openai_low_confidence_watch_with_ca_and_aped_language_is_reviewed(monkeypatch) -> None:
+    responses = [
+        SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=_content("WATCH", 0.55)))],
+            usage=SimpleNamespace(prompt_tokens=538, completion_tokens=182, total_tokens=720),
+        ),
+        SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=_content("BUY_CALL", 0.92)))],
+            usage=SimpleNamespace(prompt_tokens=560, completion_tokens=145, total_tokens=705),
+        ),
+    ]
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return responses.pop(0)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr("llm.classifier.get_settings", _settings)
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    result = LLMClassifier().classify(
+        "just aped my favorite brainrot character and chart looks good\n"
+        "2MBq3mrKSKf6NnG5x29rBK4B9f7CWR4N1EQJ18NsViRL",
+        ["2MBq3mrKSKf6NnG5x29rBK4B9f7CWR4N1EQJ18NsViRL"],
+    )
+
+    assert [call["model"] for call in calls] == ["gpt-5.4-nano", "gpt-5.4-mini"]
+    assert result.intent == "BUY_CALL"
+    assert result.was_reviewed
+    prompt = calls[0]["messages"][1]["content"]
+    assert '"just aped"' in prompt
+    assert "direct entry language" in prompt
+
+
+def test_openai_low_confidence_watch_without_entry_language_skips_review(monkeypatch) -> None:
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=_content("WATCH", 0.55)))],
+                usage=SimpleNamespace(prompt_tokens=300, completion_tokens=120, total_tokens=420),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr("llm.classifier.get_settings", _settings)
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    result = LLMClassifier().classify(
+        "watching how this develops\n2MBq3mrKSKf6NnG5x29rBK4B9f7CWR4N1EQJ18NsViRL",
+        ["2MBq3mrKSKf6NnG5x29rBK4B9f7CWR4N1EQJ18NsViRL"],
+    )
+
+    assert len(calls) == 1
+    assert result.intent == "WATCH"
+    assert not result.was_reviewed
+
+
 def test_openai_contextual_ca_prompt_includes_preceding_entry_message(monkeypatch) -> None:
     calls = []
 
@@ -116,7 +185,9 @@ def test_openai_contextual_ca_prompt_includes_preceding_entry_message(monkeypatc
         def create(self, **kwargs):
             calls.append(kwargs)
             return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content=_content("BUY_CALL", 0.9)))],
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=_content("BUY_CALL", 0.9)))
+                ],
                 usage=SimpleNamespace(prompt_tokens=400, completion_tokens=150, total_tokens=550),
             )
 

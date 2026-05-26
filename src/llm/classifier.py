@@ -30,6 +30,11 @@ INTENTS = {
 }
 SENTIMENTS = {"BULLISH", "BEARISH", "NEUTRAL", "MIXED", "UNKNOWN"}
 URGENCIES = {"LOW", "MEDIUM", "HIGH", "UNKNOWN"}
+DIRECT_ENTRY_PATTERN = re.compile(
+    r"\b(?:just\s+)?(?:ape|aped|aped\s+in|aping|bought|buying|entered|entry|"
+    r"loaded|loading|bid|bidding)\b|\b(?:진입|매수)\b",
+    re.IGNORECASE,
+)
 
 
 class MessageClassification(BaseModel):
@@ -97,6 +102,18 @@ Allowed intent labels:
 BUY_CALL, WATCH, UPDATE_BULLISH, UPDATE_BEARISH, HOLD, ADDING,
 TAKE_PROFIT, SOLD, WARNING, FLEX, REPOST, DISCUSSION, NOISE, UNKNOWN.
 
+Intent guidance:
+- BUY_CALL: the message contains a token CA and the speaker says they bought,
+  entered, or are actively entering the token, or explicitly tells readers to
+  enter. Treat slang such as "aped", "just aped", "aped in", "bought",
+  "loaded", "loading", "bid", "bidding", and "entry" as direct entry language.
+  Casual, humorous, or enthusiastic wording does not make an explicit entry a
+  mere watchlist mention.
+- WATCH: the speaker only wants to observe or keep an eye on the token and does
+  not state that they entered or are entering it.
+- UPDATE_BULLISH: bullish discussion about a previously mentioned token without
+  a new direct entry statement.
+
 {context_block}Current message:
 {raw_text}
 
@@ -158,33 +175,51 @@ class LLMClassifier:
         preceding_context: str | None = None,
     ) -> MessageClassification:
         settings = get_settings()
-        model = self.model or (settings.ollama_model if settings.llm_provider == "ollama" else settings.llm_model)
+        model = self.model or (
+            settings.ollama_model if settings.llm_provider == "ollama" else settings.llm_model
+        )
         if not settings.llm_enabled:
-            return keyword_fallback_classification(_combined_text(raw_text or "", preceding_context), extracted_cas, model)
+            return keyword_fallback_classification(
+                _combined_text(raw_text or "", preceding_context), extracted_cas, model
+            )
         if settings.llm_provider == "ollama":
             try:
                 if preceding_context:
-                    return self._classify_with_ollama(raw_text or "", extracted_cas, model, preceding_context)
+                    return self._classify_with_ollama(
+                        raw_text or "", extracted_cas, model, preceding_context
+                    )
                 return self._classify_with_ollama(raw_text or "", extracted_cas, model)
             except Exception:
-                return keyword_fallback_classification(_combined_text(raw_text or "", preceding_context), extracted_cas, model)
+                return keyword_fallback_classification(
+                    _combined_text(raw_text or "", preceding_context), extracted_cas, model
+                )
 
         if not settings.llm_api_key:
-            return self._fallback_classification(raw_text or "", extracted_cas, settings, model, preceding_context)
+            return self._fallback_classification(
+                raw_text or "", extracted_cas, settings, model, preceding_context
+            )
 
         try:
-            initial = self._classify_with_openai(raw_text or "", extracted_cas, model, preceding_context)
+            initial = self._classify_with_openai(
+                raw_text or "", extracted_cas, model, preceding_context
+            )
         except Exception as exc:
             logger.warning("Primary LLM classification failed for model %s: %s", model, exc)
-            return self._fallback_classification(raw_text or "", extracted_cas, settings, model, preceding_context)
+            return self._fallback_classification(
+                raw_text or "", extracted_cas, settings, model, preceding_context
+            )
 
         initial.initial_model_name = model
-        if not self._needs_review(initial, settings):
+        if not self._needs_review(
+            initial, settings, raw_text or "", extracted_cas, preceding_context
+        ):
             return initial
 
         review_model = getattr(settings, "llm_review_model", "gpt-5.4-mini")
         try:
-            reviewed = self._classify_with_openai(raw_text or "", extracted_cas, review_model, preceding_context)
+            reviewed = self._classify_with_openai(
+                raw_text or "", extracted_cas, review_model, preceding_context
+            )
         except Exception as exc:
             logger.warning("LLM review failed for model %s: %s", review_model, exc)
             return initial
@@ -195,7 +230,9 @@ class LLMClassifier:
         reviewed.review_prompt_tokens = reviewed.prompt_tokens
         reviewed.review_completion_tokens = reviewed.completion_tokens
         reviewed.prompt_tokens = (initial.prompt_tokens or 0) + (reviewed.prompt_tokens or 0)
-        reviewed.completion_tokens = (initial.completion_tokens or 0) + (reviewed.completion_tokens or 0)
+        reviewed.completion_tokens = (initial.completion_tokens or 0) + (
+            reviewed.completion_tokens or 0
+        )
         reviewed.total_tokens = (initial.total_tokens or 0) + (reviewed.total_tokens or 0)
         reviewed.latency_ms = (initial.latency_ms or 0) + (reviewed.latency_ms or 0)
         return reviewed
@@ -241,7 +278,9 @@ class LLMClassifier:
         parsed.model_name = model
         parsed.llm_provider = "openai"
         parsed.prompt_tokens = getattr(getattr(response, "usage", None), "prompt_tokens", None)
-        parsed.completion_tokens = getattr(getattr(response, "usage", None), "completion_tokens", None)
+        parsed.completion_tokens = getattr(
+            getattr(response, "usage", None), "completion_tokens", None
+        )
         parsed.total_tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
         parsed.latency_ms = round(elapsed_ms, 2)
         if not parsed.mentioned_cas:
@@ -249,12 +288,28 @@ class LLMClassifier:
         return parsed
 
     @staticmethod
-    def _needs_review(result: MessageClassification, settings) -> bool:
+    def _needs_review(
+        result: MessageClassification,
+        settings,
+        raw_text: str = "",
+        extracted_cas: list[str] | None = None,
+        preceding_context: str | None = None,
+    ) -> bool:
         if not getattr(settings, "llm_review_enabled", False):
             return False
-        review_intents = getattr(settings, "review_intents", {"BUY_CALL", "WARNING", "SOLD", "TAKE_PROFIT"})
+        review_intents = getattr(
+            settings, "review_intents", {"BUY_CALL", "WARNING", "SOLD", "TAKE_PROFIT"}
+        )
         threshold = getattr(settings, "llm_review_confidence_threshold", 0.75)
-        return result.intent in review_intents and result.confidence < threshold
+        if result.confidence >= threshold:
+            return False
+        if result.intent in review_intents:
+            return True
+        return (
+            result.intent == "WATCH"
+            and bool(extracted_cas)
+            and bool(DIRECT_ENTRY_PATTERN.search(_combined_text(raw_text, preceding_context)))
+        )
 
     def _fallback_classification(
         self,
@@ -267,11 +322,17 @@ class LLMClassifier:
         if getattr(settings, "llm_fallback_to_ollama", False):
             try:
                 if preceding_context:
-                    return self._classify_with_ollama(raw_text, extracted_cas, settings.ollama_model, preceding_context)
+                    return self._classify_with_ollama(
+                        raw_text, extracted_cas, settings.ollama_model, preceding_context
+                    )
                 return self._classify_with_ollama(raw_text, extracted_cas, settings.ollama_model)
             except Exception as exc:
-                logger.warning("Ollama fallback failed after primary model %s: %s", primary_model, exc)
-        return keyword_fallback_classification(_combined_text(raw_text, preceding_context), extracted_cas, primary_model)
+                logger.warning(
+                    "Ollama fallback failed after primary model %s: %s", primary_model, exc
+                )
+        return keyword_fallback_classification(
+            _combined_text(raw_text, preceding_context), extracted_cas, primary_model
+        )
 
     def _classify_with_ollama(
         self,
@@ -298,7 +359,9 @@ class LLMClassifier:
         }
         url = settings.ollama_base_url.rstrip("/") + "/api/chat"
         body = json.dumps(payload).encode("utf-8")
-        request = Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        request = Request(
+            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        )
         started = time.perf_counter()
         try:
             with urlopen(request, timeout=settings.ollama_timeout_seconds) as response:
@@ -325,11 +388,14 @@ def _format_prompt(raw_text: str, extracted_cas: list[str], preceding_context: s
     context_block = ""
     if preceding_context:
         context_block = (
-            "Candidate preceding message from the same channel, immediately before a CA-only post:\n"
+            "Candidate preceding message from the same channel, immediately before "
+            "a CA-only post:\n"
             f"{preceding_context}\n\n"
-            "Context rule: Decide whether the current CA supplies the token address for the preceding "
+            "Context rule: Decide whether the current CA supplies the token address "
+            "for the preceding "
             "message. If it clearly announces entry or buying, classify the combined intent as "
-            "BUY_CALL even when the current message is only a CA. Do not infer a buy call from mere "
+            "BUY_CALL even when the current message is only a CA. Do not infer a buy "
+            "call from mere "
             "discussion or profit flex.\n\n"
         )
     return PROMPT_TEMPLATE.format(
@@ -355,7 +421,9 @@ def keyword_fallback_classification(
     sentiment = "NEUTRAL"
     urgency = "LOW"
 
-    warning = any(word in text for word in ["rug", "scam", "danger", "warning", "조심", "사기", "덤핑"])
+    warning = any(
+        word in text for word in ["rug", "scam", "danger", "warning", "조심", "사기", "덤핑"]
+    )
     sold = any(word in text for word in ["sold", "out", "exited", "전량", "매도"])
     take_profit = any(word in text for word in ["tp", "take profit", "initial", "initials", "익절"])
     flex = any(word in text for word in ["called", "now", "x", "수익", "몇배"])
@@ -368,7 +436,19 @@ def keyword_fallback_classification(
     elif take_profit:
         intent, sentiment, urgency = "TAKE_PROFIT", "MIXED", "MEDIUM"
     elif extracted_cas and any(
-        word in text for word in ["entry", "entering", "ape", "buy", "bid", "bidding", "send", "early", "call", "진입"]
+        word in text
+        for word in [
+            "entry",
+            "entering",
+            "ape",
+            "buy",
+            "bid",
+            "bidding",
+            "send",
+            "early",
+            "call",
+            "진입",
+        ]
     ):
         intent, sentiment, urgency = "BUY_CALL", "BULLISH", "HIGH"
     elif extracted_cas:
