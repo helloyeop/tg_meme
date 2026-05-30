@@ -7,6 +7,7 @@ from app.settings import get_settings
 from data_sources.aggregator import DataSourceAggregator
 from db.models import (
     ChannelPerformance,
+    LivePosition,
     PaperPosition,
     TelegramMessage,
     TokenCallEvent,
@@ -24,6 +25,7 @@ from db.repositories import (
 from db.session import SessionLocal
 from events.context import ContextResolution, MessageContextResolver
 from events.manager import CallEventManager
+from live.engine import LiveTradingEngine
 from llm.classifier import LLMClassifier
 from paper.engine import PaperTradingEngine
 from scoring.engine import ScoringEngine
@@ -38,6 +40,7 @@ class MessagePipeline:
         self.data_sources = DataSourceAggregator()
         self.scoring = ScoringEngine()
         self.paper = PaperTradingEngine()
+        self.live = LiveTradingEngine()
 
     def process_unanalyzed_messages(self, limit: int = 100) -> int:
         processed = 0
@@ -146,6 +149,12 @@ class MessagePipeline:
                             score=score,
                             market_data=market_data,
                             decision=decision,
+                        )
+                        self.live.maybe_stage_entry(
+                            session,
+                            event=event,
+                            market_data=market_data,
+                            paper_opened=decision.opened,
                         )
                     session.commit()
                     processed += 1
@@ -303,6 +312,32 @@ class MessagePipeline:
                 )
                 session.commit()
                 logger.exception("Failed to fast refresh positions for %s", token_addresses)
+        return refreshed
+
+    def refresh_live_positions(self) -> int:
+        refreshed = 0
+        with SessionLocal() as session:
+            positions = session.scalars(
+                select(LivePosition).where(LivePosition.status == "OPEN")
+            ).all()
+            token_addresses = list(dict.fromkeys(position.token_address for position in positions))
+            if not token_addresses:
+                return 0
+
+            market_by_token = self.data_sources.dexscreener.get_tokens_market_data(
+                token_addresses[: get_settings().paper_fast_monitor_max_tokens]
+            )
+            for position in positions:
+                market_data = market_by_token.get(position.token_address)
+                if market_data is None or market_data.market_cap_usd is None:
+                    continue
+                self.live.evaluate_take_profit(
+                    session,
+                    position=position,
+                    current_market_cap_usd=market_data.market_cap_usd,
+                )
+                refreshed += 1
+            session.commit()
         return refreshed
 
     def refresh_closed_positions(self, force: bool = False) -> int:

@@ -1,7 +1,7 @@
 [project]
 name = "memecoin-telegram-call-bot"
 version = "0.1.0"
-description = "Solana-only Telegram call analytics and paper-trading system."
+description = "Solana-only Telegram call analytics with paper and guarded live-trading paths."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -40,6 +40,7 @@ packages = [
   "src/db",
   "src/events",
   "src/llm",
+  "src/live",
   "src/paper",
   "src/scoring",
   "src/telegram",

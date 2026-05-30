@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     helius_rpc_url: str | None = None
     solana_rpc_url: str = "https://api.mainnet-beta.solana.com"
     solana_agent_kit_enabled: bool = False
+    jupiter_api_key: str | None = None
+    jupiter_swap_base_url: str = "https://api.jup.ag/swap/v2"
+    live_wallet_public_key: str | None = None
+    live_order_staging_enabled: bool = False
+    live_execution_adapter: str = "disabled"
 
     database_url: str = "sqlite:///./data/app.db"
     store_market_snapshot_raw_json: bool = False
@@ -83,6 +88,8 @@ class Settings(BaseSettings):
         "gmgn_base_url",
         "helius_api_key",
         "helius_rpc_url",
+        "jupiter_api_key",
+        "live_wallet_public_key",
         mode="before",
     )
     @classmethod
@@ -112,7 +119,7 @@ class Settings(BaseSettings):
 
     @property
     def real_trading_enabled(self) -> bool:
-        return False
+        return self.live_execution_adapter != "disabled"
 
     @property
     def review_intents(self) -> set[str]:

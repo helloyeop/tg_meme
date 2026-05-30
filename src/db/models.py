@@ -356,6 +356,51 @@ class PaperEntryDecision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 
+class LivePosition(TimestampMixin, Base):
+    __tablename__ = "live_positions"
+    __table_args__ = (Index("idx_live_positions_status", "status"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("token_call_events.id"), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False)
+    token_address: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    entry_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    entry_market_cap_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_size_sol: Mapped[float] = mapped_column(Float, nullable=False)
+    target_profit_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    target_market_cap_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    highest_market_cap_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    exit_requested_time: Mapped[datetime | None] = mapped_column(DateTime)
+    exit_confirmed_time: Mapped[datetime | None] = mapped_column(DateTime)
+    realized_pnl_sol: Mapped[float] = mapped_column(Float, default=0)
+
+
+class LiveOrder(Base):
+    __tablename__ = "live_orders"
+    __table_args__ = (
+        Index("idx_live_orders_status", "status"),
+        Index("idx_live_orders_event_time", "event_id", "requested_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("token_call_events.id"), nullable=False)
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("live_positions.id"))
+    channel_id: Mapped[str] = mapped_column(String, nullable=False)
+    token_address: Mapped[str] = mapped_column(String, nullable=False)
+    side: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    requested_size_sol: Mapped[float | None] = mapped_column(Float)
+    reference_market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    target_market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    jupiter_request_id: Mapped[str | None] = mapped_column(String)
+    transaction_signature: Mapped[str | None] = mapped_column(String)
+    raw_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+
+
 class AppError(Base):
     __tablename__ = "app_errors"
 

@@ -19,6 +19,7 @@ def main() -> None:
             "pipeline",
             "refresh",
             "position-refresh",
+            "live-position-refresh",
             "closed-position-refresh",
             "all",
         ],
@@ -62,11 +63,16 @@ def main() -> None:
         count = pipeline.refresh_closed_positions(force=True)
         print(f"Post-exit tracked {count} closed paper positions.")
         return
+    if args.mode == "live-position-refresh":
+        count = pipeline.refresh_live_positions()
+        print(f"Evaluated {count} live positions.")
+        return
 
     while True:
         pipeline.process_unanalyzed_messages(limit=args.limit)
         pipeline.refresh_open_events(limit=args.limit)
         pipeline.refresh_open_positions()
+        pipeline.refresh_live_positions()
         pipeline.refresh_closed_positions()
         time.sleep(min(args.poll_seconds, get_settings().paper_fast_monitor_seconds))
 

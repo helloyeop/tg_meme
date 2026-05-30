@@ -48,6 +48,10 @@ PAGE_META = {
         "Paper portfolio",
         "Open and partially closed paper positions monitored against market cap.",
     ),
+    "Live Trading": (
+        "Live trading",
+        "Guarded live order staging and +10% take-profit readiness. Submission stays disabled.",
+    ),
     "Closed Trades": (
         "Closed trades",
         "Realized exits compared with post-exit hold-through outcomes.",
@@ -308,6 +312,7 @@ def render_header(current_page: str) -> None:
                 <span class="status-pill">{settings.llm_provider} / {settings.llm_model}</span>
                 <span class="status-pill">{paper_rules.get("entry_size_sol", 0.5)} SOL entries</span>
                 <span class="status-pill">{paper_rules.get("daily_max_loss_sol", 0.5)} SOL daily loss</span>
+                <span class="status-pill {'warn' if settings.real_trading_enabled else ''}">Live adapter: {settings.live_execution_adapter}</span>
             </div>
         </div>
         """,
@@ -326,6 +331,7 @@ page = st.sidebar.radio(
         "Call Events",
         "Entry Decisions",
         "Paper Portfolio",
+        "Live Trading",
         "Closed Trades",
         "Channel Performance",
         "Token Detail",
@@ -596,6 +602,84 @@ elif page == "Paper Portfolio":
             left join latest_market m on m.token_address=p.token_address and m.row_num=1
             where p.status in ('OPEN','PARTIALLY_CLOSED')
             order by p.entry_time desc
+            """
+        ),
+        width="stretch",
+    )
+
+elif page == "Live Trading":
+    cols = st.columns(4)
+    live_metrics = {
+        "Active live positions": """
+            select count(*) value from live_positions
+            where status in ('ENTRY_REQUESTED','OPEN','EXIT_REQUESTED')
+        """,
+        "Staged live orders": """
+            select count(*) value from live_orders where status='STAGED'
+        """,
+        "Submitted live orders": """
+            select count(*) value from live_orders where status='SUBMITTED'
+        """,
+        "Confirmed live orders": """
+            select count(*) value from live_orders where status='CONFIRMED'
+        """,
+    }
+    for col, (label, sql) in zip(cols, live_metrics.items(), strict=False):
+        df = query(sql)
+        col.metric(label, int(df.iloc[0]["value"]) if not df.empty else 0)
+
+    if settings.live_execution_adapter == "disabled":
+        st.warning(
+            "Live transaction submission is disabled. This page shows isolated live order "
+            "staging only; no wallet signer or private key is connected."
+        )
+
+    st.subheader("Live Positions")
+    st.dataframe(
+        query(
+            """
+            with latest_market as (
+              select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+              from token_market_snapshots
+            )
+            select p.id, coalesce(ch.title, p.channel_id) as channel_name,
+                   p.token_address, lm.symbol as token_symbol, lm.name as token_name,
+                   p.status, datetime(p.entry_time, '+9 hours') as entry_time_kst,
+                   p.entry_market_cap_usd, p.entry_size_sol, p.target_profit_pct,
+                   p.target_market_cap_usd, p.highest_market_cap_usd,
+                   lm.market_cap_usd as current_market_cap_usd,
+                   case when p.entry_market_cap_usd > 0 and lm.market_cap_usd is not null
+                        then round(100 * (lm.market_cap_usd / p.entry_market_cap_usd - 1), 2)
+                   end as current_return_pct,
+                   datetime(p.exit_requested_time, '+9 hours') as exit_requested_time_kst,
+                   p.realized_pnl_sol
+            from live_positions p
+            left join telegram_channels ch on ch.channel_id=p.channel_id
+            left join latest_market lm on lm.token_address=p.token_address and lm.row_num=1
+            order by p.entry_time desc
+            """
+        ),
+        width="stretch",
+    )
+    st.subheader("Live Orders")
+    st.dataframe(
+        query(
+            """
+            with latest_market as (
+              select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+              from token_market_snapshots
+            )
+            select o.id, datetime(o.requested_at, '+9 hours') as requested_at_kst,
+                   coalesce(ch.title, o.channel_id) as channel_name,
+                   o.token_address, lm.symbol as token_symbol, lm.name as token_name,
+                   o.side, o.status, o.reason, o.requested_size_sol,
+                   o.reference_market_cap_usd, o.target_market_cap_usd,
+                   o.jupiter_request_id, o.transaction_signature
+            from live_orders o
+            left join telegram_channels ch on ch.channel_id=o.channel_id
+            left join latest_market lm on lm.token_address=o.token_address and lm.row_num=1
+            order by o.requested_at desc, o.id desc
+            limit 500
             """
         ),
         width="stretch",

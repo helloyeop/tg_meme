@@ -7,6 +7,12 @@ paper:
   max_open_positions: 5
   max_positions_per_channel: 2
 
+live:
+  entry_size_sol: 0.05
+  take_profit_pct: 10
+  max_open_positions: 1
+  max_entry_size_sol: 0.05
+
 entry:
   final_signal_score_min: 45
   risk_score_min: 60

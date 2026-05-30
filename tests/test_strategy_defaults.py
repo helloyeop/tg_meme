@@ -12,3 +12,5 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
     assert strategy["entry"]["risk_score_min"] == 60
     assert strategy["entry"]["min_liquidity_usd"] == 1000
     assert strategy["exit"]["stop_loss_pct"] == -50
+    assert strategy["live"]["entry_size_sol"] == 0.05
+    assert strategy["live"]["take_profit_pct"] == 10
