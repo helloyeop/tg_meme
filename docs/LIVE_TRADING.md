@@ -146,6 +146,11 @@ priority fees, slippage, and price movement can produce a small loss. If the
 SELL leg fails, USDC can remain in the dedicated wallet and must be reviewed
 before retrying.
 
+The signer stores the Jupiter request id and signed transaction in its isolated
+ledger before `/execute`. If the network disconnects while the submission
+result is unknown, retrying the same `client_order_id` resumes the same signed
+transaction instead of assembling a duplicate swap.
+
 ## Enable And Emergency Stop
 
 After the manual round-trip QA succeeds, enable automated live trading:

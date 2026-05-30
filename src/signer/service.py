@@ -36,9 +36,19 @@ class SignerRuntime:
         self._init_ledger()
 
     def execute(self, request: SwapRequest) -> dict:
-        existing = self._find_result(request.client_order_id)
+        existing = self._find_existing(request)
         if existing:
-            return existing
+            if existing["status"] != "PENDING":
+                return json.loads(existing["raw_json"])
+            if existing["signed_transaction"] and existing["request_id"]:
+                return self._submit_and_record(
+                    request,
+                    existing["side"],
+                    existing["signed_transaction"],
+                    existing["request_id"],
+                    {"inAmount": str(existing["amount"])},
+                )
+            raise HTTPException(409, "Swap request is already pending preparation.")
         side = request.side.upper()
         if side not in {"BUY", "SELL"}:
             raise HTTPException(400, "Only BUY and SELL swaps are supported.")
@@ -50,13 +60,38 @@ class SignerRuntime:
             input_mint, output_mint = request.token_address, WRAPPED_SOL_MINT
 
         self._reserve(side, request)
-        order = self._get_order(input_mint, output_mint, request.amount)
-        signed_transaction = self._sign(order["transaction"])
-        execution = self._execute_order(signed_transaction, order["requestId"])
+        try:
+            order = self._get_order(input_mint, output_mint, request.amount)
+            signed_transaction = self._sign(order["transaction"])
+            self._store_pending_execution(
+                request.client_order_id, order["requestId"], signed_transaction
+            )
+        except Exception as exc:
+            self._record_error(request.client_order_id, str(exc))
+            raise
+        return self._submit_and_record(
+            request, side, signed_transaction, order["requestId"], order
+        )
+
+    def _submit_and_record(
+        self,
+        request: SwapRequest,
+        side: str,
+        signed_transaction: str,
+        request_id: str,
+        order: dict,
+    ) -> dict:
+        try:
+            execution = self._execute_order(signed_transaction, request_id)
+        except Exception as exc:
+            raise HTTPException(
+                503,
+                "Swap submission outcome is unknown. Retry the same client_order_id.",
+            ) from exc
         result = {
             "status": execution.get("status"),
             "signature": execution.get("signature"),
-            "request_id": order["requestId"],
+            "request_id": request_id,
             "input_amount": execution.get("inputAmountResult") or order.get("inAmount"),
             "output_amount": execution.get("outputAmountResult") or order.get("outAmount"),
             "error": execution.get("error"),
@@ -169,17 +204,28 @@ class SignerRuntime:
             response.raise_for_status()
             return response.json()
 
-    def _find_result(self, client_order_id: str) -> dict | None:
+    def _find_existing(self, request: SwapRequest) -> dict | None:
         with sqlite3.connect(self.ledger_path) as connection:
+            connection.row_factory = sqlite3.Row
             row = connection.execute(
-                "SELECT status, raw_json FROM swaps WHERE client_order_id=?",
-                (client_order_id,),
+                """
+                SELECT status, side, token_address, amount, raw_json, request_id,
+                       signed_transaction
+                FROM swaps
+                WHERE client_order_id=?
+                """,
+                (request.client_order_id,),
             ).fetchone()
         if row is None:
             return None
-        if row[0] == "PENDING":
-            raise HTTPException(409, "Swap request is already pending.")
-        return json.loads(row[1])
+        existing = dict(row)
+        if (
+            existing["side"] != request.side.upper()
+            or existing["token_address"] != request.token_address
+            or existing["amount"] != request.amount
+        ):
+            raise HTTPException(409, "client_order_id was reused with different swap details.")
+        return existing
 
     def _reserve(self, side: str, request: SwapRequest) -> None:
         with sqlite3.connect(self.ledger_path) as connection:
@@ -215,6 +261,30 @@ class SignerRuntime:
                 ),
             )
 
+    def _store_pending_execution(
+        self, client_order_id: str, request_id: str, signed_transaction: str
+    ) -> None:
+        with sqlite3.connect(self.ledger_path) as connection:
+            connection.execute(
+                """
+                UPDATE swaps
+                SET request_id=?, signed_transaction=?
+                WHERE client_order_id=?
+                """,
+                (request_id, signed_transaction, client_order_id),
+            )
+
+    def _record_error(self, client_order_id: str, error: str) -> None:
+        with sqlite3.connect(self.ledger_path) as connection:
+            connection.execute(
+                """
+                UPDATE swaps
+                SET status='FAILED', raw_json=?
+                WHERE client_order_id=?
+                """,
+                (json.dumps({"status": "FAILED", "error": error}), client_order_id),
+            )
+
     def _init_ledger(self) -> None:
         with sqlite3.connect(self.ledger_path) as connection:
             connection.execute(
@@ -228,6 +298,8 @@ class SignerRuntime:
                     amount INTEGER NOT NULL,
                     status TEXT,
                     signature TEXT,
+                    request_id TEXT,
+                    signed_transaction TEXT,
                     input_amount INTEGER,
                     output_amount INTEGER,
                     raw_json TEXT,
@@ -235,6 +307,13 @@ class SignerRuntime:
                 )
                 """
             )
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(swaps)").fetchall()
+            }
+            if "request_id" not in columns:
+                connection.execute("ALTER TABLE swaps ADD COLUMN request_id TEXT")
+            if "signed_transaction" not in columns:
+                connection.execute("ALTER TABLE swaps ADD COLUMN signed_transaction TEXT")
 
     @staticmethod
     def _load_keypair(path: Path) -> Keypair:

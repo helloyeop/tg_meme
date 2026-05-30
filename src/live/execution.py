@@ -146,7 +146,7 @@ class LiveOrderExecutor:
                     amount=amount,
                 )
             except Exception as exc:
-                order.status = "FAILED"
+                order.status = "STAGED"
                 order.raw_json = json.dumps({"error": str(exc)})
                 continue
 
