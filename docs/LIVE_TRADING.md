@@ -101,6 +101,20 @@ shell history.
 7. Verify `docker compose exec signer curl -fsS http://localhost:8787/health`.
 8. Enable `LIVE_EXECUTION_ADAPTER=signer_service` only after the staging review.
 
+## Quote-Only QA
+
+Before funding the dedicated wallet, verify Jupiter authentication and routing
+without signing or submitting a transaction:
+
+```bash
+cd /opt/memetrading
+docker compose exec -T signer python -m signer.quote_qa
+```
+
+This sends a `0.5 SOL -> USDC` quote request without a `taker`. Jupiter returns
+quote data without a signable transaction. The command refuses the result if a
+transaction is unexpectedly returned. It never calls `/execute`.
+
 ## Operational Record
 
 Decision recorded on `2026-05-30`:
