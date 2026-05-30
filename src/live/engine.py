@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -52,9 +52,15 @@ class LiveTradingEngine:
         max_entry_size_sol = self.live.get("max_entry_size_sol", 0.05)
         if entry_size_sol > max_entry_size_sol:
             return LiveDecision(False, "live_entry_size_exceeds_cap")
+        if self._daily_realized_loss_sol(session, now) >= self.live.get(
+            "daily_max_loss_sol", 1
+        ):
+            return LiveDecision(False, "live_daily_loss_limit_reached")
 
         take_profit_pct = self.live.get("take_profit_pct", 10)
+        stop_loss_pct = self.live.get("stop_loss_pct", -70)
         target_market_cap = market_data.market_cap_usd * (1 + take_profit_pct / 100)
+        stop_loss_market_cap = market_data.market_cap_usd * (1 + stop_loss_pct / 100)
         position = LivePosition(
             event_id=event.id,
             channel_id=event.channel_id,
@@ -65,6 +71,8 @@ class LiveTradingEngine:
             entry_size_sol=entry_size_sol,
             target_profit_pct=take_profit_pct,
             target_market_cap_usd=target_market_cap,
+            stop_loss_pct=stop_loss_pct,
+            stop_loss_market_cap_usd=stop_loss_market_cap,
             highest_market_cap_usd=market_data.market_cap_usd,
         )
         session.add(position)
@@ -86,7 +94,7 @@ class LiveTradingEngine:
         session.flush()
         return LiveDecision(True, "entry_staged", order, position)
 
-    def evaluate_take_profit(
+    def evaluate_exit(
         self,
         session: Session,
         *,
@@ -100,10 +108,14 @@ class LiveTradingEngine:
         )
         if position.status != "OPEN":
             return LiveDecision(False, "live_position_not_open", position=position)
-        if current_market_cap_usd < position.target_market_cap_usd:
-            return LiveDecision(False, "take_profit_not_reached", position=position)
         if self._has_pending_exit(session, position.id):
             return LiveDecision(False, "live_exit_already_staged", position=position)
+        if current_market_cap_usd >= position.target_market_cap_usd:
+            reason = "take_profit_10_pct"
+        elif current_market_cap_usd <= position.stop_loss_market_cap_usd:
+            reason = "emergency_stop_loss_70_pct"
+        else:
+            return LiveDecision(False, "live_exit_threshold_not_reached", position=position)
 
         position.status = "EXIT_REQUESTED"
         position.exit_requested_time = now
@@ -114,14 +126,25 @@ class LiveTradingEngine:
             token_address=position.token_address,
             side="SELL",
             status="STAGED",
-            reason="take_profit_10_pct",
+            reason=reason,
             requested_at=now,
             reference_market_cap_usd=current_market_cap_usd,
             target_market_cap_usd=position.target_market_cap_usd,
         )
         session.add(order)
         session.flush()
-        return LiveDecision(True, "take_profit_exit_staged", order, position)
+        return LiveDecision(True, f"{reason}_exit_staged", order, position)
+
+    def _daily_realized_loss_sol(self, session: Session, now: datetime) -> float:
+        day_start = datetime.combine(now.date(), time.min)
+        realized = session.scalar(
+            select(func.sum(LivePosition.realized_pnl_sol)).where(
+                LivePosition.status == "CLOSED",
+                LivePosition.exit_confirmed_time >= day_start,
+                LivePosition.realized_pnl_sol < 0,
+            )
+        )
+        return abs(float(realized or 0))
 
     def _has_active_position(self, session: Session, event_id: int) -> bool:
         return bool(

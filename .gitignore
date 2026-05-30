@@ -10,6 +10,8 @@ data/
 *.session
 *.session-journal
 sessions/
+signer-data/
+wallet-secrets/
 node_modules/
 config/channels.yaml
 config/strategy.yaml

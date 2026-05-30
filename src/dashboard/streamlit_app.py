@@ -50,7 +50,7 @@ PAGE_META = {
     ),
     "Live Trading": (
         "Live trading",
-        "Guarded live order staging and +10% take-profit readiness. Submission stays disabled.",
+        "Isolated live ledger with +10% take-profit and -70% emergency stop-loss.",
     ),
     "Closed Trades": (
         "Closed trades",

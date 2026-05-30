@@ -20,6 +20,7 @@ def main() -> None:
             "refresh",
             "position-refresh",
             "live-position-refresh",
+            "live-order-execute",
             "closed-position-refresh",
             "all",
         ],
@@ -67,12 +68,17 @@ def main() -> None:
         count = pipeline.refresh_live_positions()
         print(f"Evaluated {count} live positions.")
         return
+    if args.mode == "live-order-execute":
+        count = pipeline.execute_live_orders()
+        print(f"Executed {count} live orders.")
+        return
 
     while True:
         pipeline.process_unanalyzed_messages(limit=args.limit)
         pipeline.refresh_open_events(limit=args.limit)
         pipeline.refresh_open_positions()
         pipeline.refresh_live_positions()
+        pipeline.execute_live_orders()
         pipeline.refresh_closed_positions()
         time.sleep(min(args.poll_seconds, get_settings().paper_fast_monitor_seconds))
 

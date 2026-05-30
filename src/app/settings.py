@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     live_wallet_public_key: str | None = None
     live_order_staging_enabled: bool = False
     live_execution_adapter: str = "disabled"
+    live_signer_base_url: str = "http://signer:8787"
+    live_signer_auth_token: str | None = None
+    live_signer_keypair_path: Path = Path("/run/wallet-secrets/live-wallet.json")
 
     database_url: str = "sqlite:///./data/app.db"
     store_market_snapshot_raw_json: bool = False
@@ -90,6 +93,7 @@ class Settings(BaseSettings):
         "helius_rpc_url",
         "jupiter_api_key",
         "live_wallet_public_key",
+        "live_signer_auth_token",
         mode="before",
     )
     @classmethod

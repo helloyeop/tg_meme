@@ -26,6 +26,7 @@ from db.session import SessionLocal
 from events.context import ContextResolution, MessageContextResolver
 from events.manager import CallEventManager
 from live.engine import LiveTradingEngine
+from live.execution import LiveOrderExecutor
 from llm.classifier import LLMClassifier
 from paper.engine import PaperTradingEngine
 from scoring.engine import ScoringEngine
@@ -41,6 +42,7 @@ class MessagePipeline:
         self.scoring = ScoringEngine()
         self.paper = PaperTradingEngine()
         self.live = LiveTradingEngine()
+        self.live_executor = LiveOrderExecutor()
 
     def process_unanalyzed_messages(self, limit: int = 100) -> int:
         processed = 0
@@ -331,7 +333,7 @@ class MessagePipeline:
                 market_data = market_by_token.get(position.token_address)
                 if market_data is None or market_data.market_cap_usd is None:
                     continue
-                self.live.evaluate_take_profit(
+                self.live.evaluate_exit(
                     session,
                     position=position,
                     current_market_cap_usd=market_data.market_cap_usd,
@@ -339,6 +341,12 @@ class MessagePipeline:
                 refreshed += 1
             session.commit()
         return refreshed
+
+    def execute_live_orders(self) -> int:
+        with SessionLocal() as session:
+            executed = self.live_executor.execute_staged_orders(session)
+            session.commit()
+            return executed
 
     def refresh_closed_positions(self, force: bool = False) -> int:
         settings = get_settings()

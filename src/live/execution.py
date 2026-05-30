@@ -1,10 +1,18 @@
+import json
+import logging
 from dataclasses import dataclass
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from alerts.bot import TelegramAlertBot
 from app.settings import get_settings
+from db.models import LiveOrder, LivePosition
 
 WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112"
+LAMPORTS_PER_SOL = 1_000_000_000
+logger = logging.getLogger(__name__)
 
 
 class LiveExecutionDisabled(RuntimeError):
@@ -71,3 +79,120 @@ class JupiterSwapClient:
             "No signer-backed live execution adapter is configured. "
             "The app intentionally refuses to submit transactions."
         )
+
+
+class SignerClient:
+    """Calls the isolated signer service without exposing its keypair to this app."""
+
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
+
+    def execute(
+        self, *, client_order_id: str, side: str, token_address: str, amount: int
+    ) -> dict:
+        if self.settings.live_execution_adapter != "signer_service":
+            raise LiveExecutionDisabled("Signer service execution is disabled.")
+        if not self.settings.live_signer_auth_token:
+            raise LiveExecutionDisabled("LIVE_SIGNER_AUTH_TOKEN is not configured.")
+        with httpx.Client(timeout=45) as client:
+            response = client.post(
+                f"{self.settings.live_signer_base_url.rstrip('/')}/swap",
+                headers={"Authorization": f"Bearer {self.settings.live_signer_auth_token}"},
+                json={
+                    "client_order_id": client_order_id,
+                    "side": side,
+                    "token_address": token_address,
+                    "amount": amount,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+
+class LiveOrderExecutor:
+    """Executes staged orders through the isolated signer and updates the live ledger."""
+
+    def __init__(self, settings=None, signer=None, alerts=None):
+        self.settings = settings or get_settings()
+        self.signer = signer or SignerClient(self.settings)
+        self.alerts = alerts or TelegramAlertBot()
+
+    def execute_staged_orders(self, session: Session, limit: int = 5) -> int:
+        if self.settings.live_execution_adapter != "signer_service":
+            return 0
+        orders = session.scalars(
+            select(LiveOrder)
+            .where(LiveOrder.status == "STAGED")
+            .order_by(LiveOrder.requested_at.asc(), LiveOrder.id.asc())
+            .limit(limit)
+        ).all()
+        executed = 0
+        for order in orders:
+            position = session.get(LivePosition, order.position_id)
+            if position is None:
+                order.status = "FAILED"
+                order.raw_json = json.dumps({"error": "missing_live_position"})
+                continue
+            amount = self._amount_for_order(order, position)
+            if amount is None:
+                order.status = "FAILED"
+                order.raw_json = json.dumps({"error": "missing_swap_amount"})
+                continue
+            try:
+                payload = self.signer.execute(
+                    client_order_id=f"live-order-{order.id}",
+                    side=order.side,
+                    token_address=order.token_address,
+                    amount=amount,
+                )
+            except Exception as exc:
+                order.status = "FAILED"
+                order.raw_json = json.dumps({"error": str(exc)})
+                continue
+
+            order.raw_json = json.dumps(payload)
+            order.jupiter_request_id = payload.get("request_id")
+            order.transaction_signature = payload.get("signature")
+            if payload.get("status") != "Success":
+                order.status = "FAILED"
+                continue
+
+            order.status = "CONFIRMED"
+            if order.side == "BUY":
+                position.status = "OPEN"
+                position.entry_input_lamports = str(amount)
+                position.token_amount_raw = str(payload.get("output_amount") or "")
+            else:
+                position.status = "CLOSED"
+                position.exit_confirmed_time = order.requested_at
+                position.exit_output_lamports = str(payload.get("output_amount") or "")
+                position.realized_pnl_sol = (
+                    int(position.exit_output_lamports or 0)
+                    - int(position.entry_input_lamports or 0)
+                ) / LAMPORTS_PER_SOL
+            self._send_alert(order, position)
+            executed += 1
+        return executed
+
+    def _amount_for_order(self, order: LiveOrder, position: LivePosition) -> int | None:
+        if order.side == "BUY" and order.requested_size_sol is not None:
+            return int(order.requested_size_sol * LAMPORTS_PER_SOL)
+        if order.side == "SELL" and position.token_amount_raw:
+            return int(position.token_amount_raw)
+        return None
+
+    def _send_alert(self, order: LiveOrder, position: LivePosition) -> None:
+        try:
+            self.alerts.send_message(
+                "\n".join(
+                    [
+                        f"Live {order.side} confirmed",
+                        f"Token: {order.token_address}",
+                        f"Reason: {order.reason}",
+                        f"Signature: {order.transaction_signature}",
+                        f"Position: {position.status}",
+                    ]
+                )
+            )
+        except Exception:
+            logger.exception("Failed to send live trade Telegram alert")

@@ -94,6 +94,13 @@ def _migrate_market_cap_columns() -> None:
             "post_exit_snapshot_count": "INTEGER DEFAULT 0",
         },
         "paper_trade_fills": {"market_cap_usd": "FLOAT"},
+        "live_positions": {
+            "stop_loss_pct": "FLOAT DEFAULT -70",
+            "stop_loss_market_cap_usd": "FLOAT DEFAULT 0",
+            "token_amount_raw": "VARCHAR",
+            "entry_input_lamports": "VARCHAR",
+            "exit_output_lamports": "VARCHAR",
+        },
     }
     inspector = inspect(engine)
     with engine.begin() as connection:
