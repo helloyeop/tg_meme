@@ -88,6 +88,14 @@ shell history.
 4. Set a long random `LIVE_SIGNER_AUTH_TOKEN` in `.env`.
    Local `.env` changes are not copied to the VPS during Git deployment. Set
    `JUPITER_API_KEY` directly in `/opt/memetrading/.env` on the VPS as well.
+   After deployments that add environment settings, reconcile missing VPS
+   defaults without overwriting existing secrets:
+
+   ```bash
+   cd /opt/memetrading
+   LIVE_WALLET_PUBLIC_KEY_VALUE=FFDuhHWsDuoUrFAY3Ggk8gty8EeNjArrXLC21UcULvvh \
+     bash scripts/reconcile_vps_env.sh .env
+   ```
 5. Keep `LIVE_EXECUTION_ADAPTER=disabled` while running staged-order QA.
 6. Start the isolated service with `docker compose --profile live up -d signer`.
 7. Verify `docker compose exec signer curl -fsS http://localhost:8787/health`.
