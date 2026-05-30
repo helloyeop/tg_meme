@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     paper_initial_balance_sol: float = 20.0
     paper_entry_size_sol: float = 0.5
-    paper_daily_max_loss_sol: float = 0.5
+    paper_daily_max_loss_sol: float = 2.0
     open_event_refresh_seconds: int = 300
     paper_fast_monitor_enabled: bool = True
     paper_fast_monitor_seconds: int = 5
@@ -116,7 +116,11 @@ class Settings(BaseSettings):
 
     @property
     def review_intents(self) -> set[str]:
-        return {intent.strip().upper() for intent in self.llm_review_intents.split(",") if intent.strip()}
+        return {
+            intent.strip().upper()
+            for intent in self.llm_review_intents.split(",")
+            if intent.strip()
+        }
 
     def load_channels_config(self) -> dict:
         return _load_yaml_with_example_fallback(

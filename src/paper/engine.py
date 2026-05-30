@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,6 +15,8 @@ class PaperDecision:
     opened: bool
     reason: str
     position: PaperPosition | None = None
+    daily_loss_sol: float | None = None
+    daily_loss_limit_sol: float | None = None
 
 
 class PaperTradingEngine:
@@ -34,22 +36,64 @@ class PaperTradingEngine:
         now: datetime | None = None,
     ) -> PaperDecision:
         now = now or datetime.utcnow()
+        daily_loss = self._daily_loss(session, now)
+        daily_loss_limit = abs(self.paper.get("daily_max_loss_sol", 0.5))
         if market_data is None or market_data.market_cap_usd is None:
-            return PaperDecision(False, "missing_market_cap")
+            return PaperDecision(
+                False,
+                "missing_market_cap",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
         if score.final_signal_score < self.entry.get("final_signal_score_min", 55):
-            return PaperDecision(False, "score_below_threshold")
+            return PaperDecision(
+                False,
+                "score_below_threshold",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
         if score.risk_score < self.entry.get("risk_score_min", 65):
-            return PaperDecision(False, "risk_below_threshold")
+            return PaperDecision(
+                False,
+                "risk_below_threshold",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
         if (market_data.liquidity_usd or 0) < self.entry.get("min_liquidity_usd", 5000):
-            return PaperDecision(False, "liquidity_below_threshold")
+            return PaperDecision(
+                False,
+                "liquidity_below_threshold",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
         if event.warning_count and self.entry.get("no_warning_in_event", True):
-            return PaperDecision(False, "event_has_warning")
+            return PaperDecision(
+                False,
+                "event_has_warning",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
         if event.sold_count and self.entry.get("no_sold_message_in_event", True):
-            return PaperDecision(False, "event_has_sold")
+            return PaperDecision(
+                False,
+                "event_has_sold",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
         if self._has_open_same_event(session, event):
-            return PaperDecision(False, "position_already_open")
-        if self._daily_loss(session, now.date()) <= -abs(self.paper.get("daily_max_loss_sol", 0.5)):
-            return PaperDecision(False, "daily_loss_limit_reached")
+            return PaperDecision(
+                False,
+                "position_already_open",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
+        if daily_loss <= -daily_loss_limit:
+            return PaperDecision(
+                False,
+                "daily_loss_limit_reached",
+                daily_loss_sol=daily_loss,
+                daily_loss_limit_sol=daily_loss_limit,
+            )
 
         entry_size_sol = self.paper.get("entry_size_sol", get_settings().paper_entry_size_sol)
         slippage = self.strategy.get("paper", {}).get("estimated_slippage_pct", 5) / 100
@@ -69,7 +113,8 @@ class PaperTradingEngine:
             highest_price_usd=entry_price,
             stop_loss_price_usd=entry_price * (1 + self.exit.get("stop_loss_pct", -25) / 100),
             highest_market_cap_usd=entry_market_cap,
-            stop_loss_market_cap_usd=entry_market_cap * (1 + self.exit.get("stop_loss_pct", -25) / 100),
+            stop_loss_market_cap_usd=entry_market_cap
+            * (1 + self.exit.get("stop_loss_pct", -25) / 100),
         )
         session.add(position)
         session.flush()
@@ -86,7 +131,13 @@ class PaperTradingEngine:
             )
         )
         session.flush()
-        return PaperDecision(True, "opened", position)
+        return PaperDecision(
+            True,
+            "opened",
+            position,
+            daily_loss_sol=daily_loss,
+            daily_loss_limit_sol=daily_loss_limit,
+        )
 
     def update_position(
         self,
@@ -101,18 +152,52 @@ class PaperTradingEngine:
         now = now or datetime.utcnow()
         if not position.entry_market_cap_usd:
             return position
-        position.highest_market_cap_usd = max(position.highest_market_cap_usd or 0, current_market_cap_usd)
+        position.highest_market_cap_usd = max(
+            position.highest_market_cap_usd or 0, current_market_cap_usd
+        )
         return_pct = ((current_market_cap_usd / position.entry_market_cap_usd) - 1) * 100
-        position.unrealized_pnl_sol = position.entry_size_sol * position.remaining_ratio * (return_pct / 100)
+        position.unrealized_pnl_sol = (
+            position.entry_size_sol * position.remaining_ratio * (return_pct / 100)
+        )
 
         if return_pct <= self.exit.get("stop_loss_pct", -25):
-            self._sell(session, position, current_market_cap_usd, current_price_usd, 1.0, "stop_loss", now)
-        elif return_pct >= self.exit.get("take_profit_2_pct", 100) and position.remaining_ratio > 0.2:
-            self._sell(session, position, current_market_cap_usd, current_price_usd, self.exit.get("take_profit_2_sell_ratio", 30) / 100, "take_profit_2", now)
-        elif return_pct >= self.exit.get("take_profit_1_pct", 30) and position.remaining_ratio > 0.5:
-            self._sell(session, position, current_market_cap_usd, current_price_usd, self.exit.get("take_profit_1_sell_ratio", 50) / 100, "take_profit_1", now)
+            self._sell(
+                session, position, current_market_cap_usd, current_price_usd, 1.0, "stop_loss", now
+            )
+        elif (
+            return_pct >= self.exit.get("take_profit_2_pct", 100) and position.remaining_ratio > 0.2
+        ):
+            self._sell(
+                session,
+                position,
+                current_market_cap_usd,
+                current_price_usd,
+                self.exit.get("take_profit_2_sell_ratio", 30) / 100,
+                "take_profit_2",
+                now,
+            )
+        elif (
+            return_pct >= self.exit.get("take_profit_1_pct", 30) and position.remaining_ratio > 0.5
+        ):
+            self._sell(
+                session,
+                position,
+                current_market_cap_usd,
+                current_price_usd,
+                self.exit.get("take_profit_1_sell_ratio", 50) / 100,
+                "take_profit_1",
+                now,
+            )
         elif reason in {"WARNING", "SOLD"}:
-            self._sell(session, position, current_market_cap_usd, current_price_usd, 1.0, f"message_{reason.lower()}", now)
+            self._sell(
+                session,
+                position,
+                current_market_cap_usd,
+                current_price_usd,
+                1.0,
+                f"message_{reason.lower()}",
+                now,
+            )
 
         session.flush()
         return position
@@ -137,22 +222,27 @@ class PaperTradingEngine:
             position.post_exit_reference_market_cap_usd = position.entry_market_cap_usd
         if position.post_exit_reference_market_cap_usd is None:
             entry_snapshots = session.scalars(
-                select(TokenMarketSnapshot)
-                .where(
+                select(TokenMarketSnapshot).where(
                     TokenMarketSnapshot.token_address == position.token_address,
-                    TokenMarketSnapshot.snapshot_time >= position.entry_time - timedelta(minutes=10),
-                    TokenMarketSnapshot.snapshot_time <= position.entry_time + timedelta(minutes=10),
+                    TokenMarketSnapshot.snapshot_time
+                    >= position.entry_time - timedelta(minutes=10),
+                    TokenMarketSnapshot.snapshot_time
+                    <= position.entry_time + timedelta(minutes=10),
                     TokenMarketSnapshot.market_cap_usd.is_not(None),
                 )
             ).all()
             entry_snapshot = min(
                 entry_snapshots,
-                key=lambda snapshot: abs((snapshot.snapshot_time - position.entry_time).total_seconds()),
+                key=lambda snapshot: abs(
+                    (snapshot.snapshot_time - position.entry_time).total_seconds()
+                ),
                 default=None,
             )
             if entry_snapshot and entry_snapshot.market_cap_usd is not None:
                 slippage = self.paper.get("estimated_slippage_pct", 5) / 100
-                position.post_exit_reference_market_cap_usd = entry_snapshot.market_cap_usd * (1 + slippage)
+                position.post_exit_reference_market_cap_usd = entry_snapshot.market_cap_usd * (
+                    1 + slippage
+                )
 
         latest = snapshots[-1]
         highest = max(snapshots, key=lambda snapshot: snapshot.market_cap_usd or 0)
@@ -185,7 +275,11 @@ class PaperTradingEngine:
         pnl_sol = size_sol * ((sell_market_cap / position.entry_market_cap_usd) - 1)
         position.remaining_ratio = max(0, position.remaining_ratio - sell_ratio)
         position.realized_pnl_sol += pnl_sol
-        position.unrealized_pnl_sol = position.entry_size_sol * position.remaining_ratio * ((sell_market_cap / position.entry_market_cap_usd) - 1)
+        position.unrealized_pnl_sol = (
+            position.entry_size_sol
+            * position.remaining_ratio
+            * ((sell_market_cap / position.entry_market_cap_usd) - 1)
+        )
         if position.remaining_ratio <= 0.0001:
             position.status = "CLOSED"
             position.exit_time = now
@@ -218,13 +312,14 @@ class PaperTradingEngine:
             )
         )
 
-    def _daily_loss(self, session: Session, day: date) -> float:
-        start = datetime.combine(day, datetime.min.time())
-        end = datetime.combine(day, datetime.max.time())
+    def _daily_loss(self, session: Session, now: datetime) -> float:
+        kst_day = (now + timedelta(hours=9)).date()
+        start = datetime.combine(kst_day, datetime.min.time()) - timedelta(hours=9)
+        end = start + timedelta(days=1)
         pnl = session.scalar(
             select(func.coalesce(func.sum(PaperTradeFill.pnl_sol), 0.0)).where(
                 PaperTradeFill.fill_time >= start,
-                PaperTradeFill.fill_time <= end,
+                PaperTradeFill.fill_time < end,
                 PaperTradeFill.pnl_sol < 0,
             )
         )

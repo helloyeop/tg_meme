@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -115,8 +125,12 @@ class MessageContextLink(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    context_message_db_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), nullable=False)
-    target_message_db_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), nullable=False)
+    context_message_db_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_messages.id"), nullable=False
+    )
+    target_message_db_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_messages.id"), nullable=False
+    )
     token_address: Mapped[str] = mapped_column(String, nullable=False)
     context_type: Mapped[str] = mapped_column(String, nullable=False)
     context_delay_seconds: Mapped[float | None] = mapped_column(Float)
@@ -311,6 +325,34 @@ class PaperTradeFill(Base):
     size_sol: Mapped[float | None] = mapped_column(Float)
     pnl_sol: Mapped[float | None] = mapped_column(Float)
     reason: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+
+
+class PaperEntryDecision(Base):
+    __tablename__ = "paper_entry_decisions"
+    __table_args__ = (
+        Index("idx_entry_decisions_event_time", "event_id", "decision_time"),
+        Index("idx_entry_decisions_reason", "reason"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("token_call_events.id"), nullable=False)
+    message_db_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_messages.id"))
+    analysis_id: Mapped[int | None] = mapped_column(ForeignKey("message_analysis.id"))
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("paper_positions.id"))
+    token_address: Mapped[str] = mapped_column(String, nullable=False)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False)
+    decision_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    opened: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    intent: Mapped[str | None] = mapped_column(String)
+    final_signal_score: Mapped[float | None] = mapped_column(Float)
+    risk_score: Mapped[float | None] = mapped_column(Float)
+    market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    liquidity_usd: Mapped[float | None] = mapped_column(Float)
+    daily_loss_sol: Mapped[float | None] = mapped_column(Float)
+    daily_loss_limit_sol: Mapped[float | None] = mapped_column(Float)
+    score_breakdown_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 

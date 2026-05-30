@@ -10,6 +10,7 @@ from db.models import (
     ExtractedAddress,
     MessageAnalysis,
     MessageContextLink,
+    PaperEntryDecision,
     TelegramChannel,
     TelegramMessage,
     TokenMarketSnapshot,
@@ -114,7 +115,9 @@ def store_extracted_addresses(
     return rows
 
 
-def store_message_analysis(session: Session, *, message_db_id: int, analysis: dict) -> MessageAnalysis:
+def store_message_analysis(
+    session: Session, *, message_db_id: int, analysis: dict
+) -> MessageAnalysis:
     row = MessageAnalysis(
         message_db_id=message_db_id,
         token_address=(analysis.get("mentioned_cas") or [None])[0],
@@ -239,7 +242,43 @@ def store_security_snapshot(session: Session, security_data) -> TokenSecuritySna
     return row
 
 
-def log_app_error(session: Session, component: str, exc: Exception, context: dict | None = None) -> None:
+def store_paper_entry_decision(
+    session: Session,
+    *,
+    event,
+    message: TelegramMessage,
+    analysis: MessageAnalysis,
+    score,
+    market_data,
+    decision,
+) -> PaperEntryDecision:
+    row = PaperEntryDecision(
+        event_id=event.id,
+        message_db_id=message.id,
+        analysis_id=analysis.id,
+        position_id=decision.position.id if decision.position else None,
+        token_address=event.token_address,
+        channel_id=event.channel_id,
+        decision_time=datetime.utcnow(),
+        opened=decision.opened,
+        reason=decision.reason,
+        intent=analysis.intent,
+        final_signal_score=score.final_signal_score,
+        risk_score=score.risk_score,
+        market_cap_usd=market_data.market_cap_usd if market_data else None,
+        liquidity_usd=market_data.liquidity_usd if market_data else None,
+        daily_loss_sol=decision.daily_loss_sol,
+        daily_loss_limit_sol=decision.daily_loss_limit_sol,
+        score_breakdown_json=json.dumps(score.breakdown, ensure_ascii=False),
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def log_app_error(
+    session: Session, component: str, exc: Exception, context: dict | None = None
+) -> None:
     session.add(
         AppError(
             component=component,

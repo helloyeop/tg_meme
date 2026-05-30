@@ -8,7 +8,6 @@ from sqlalchemy import text
 from app.settings import get_settings
 from db.session import create_db_engine
 
-
 st.set_page_config(page_title="Memecoin Telegram Call Bot", layout="wide")
 st.title("Memecoin Telegram Call Bot")
 
@@ -40,6 +39,7 @@ page = st.sidebar.radio(
         "Live Messages",
         "Context Links",
         "Call Events",
+        "Entry Decisions",
         "Paper Portfolio",
         "Closed Trades",
         "Channel Performance",
@@ -206,6 +206,69 @@ elif page == "Call Events":
         width="stretch",
     )
 
+elif page == "Entry Decisions":
+    cols = st.columns(4)
+    decision_metrics = {
+        "Decisions today (KST)": f"""
+            select count(*) value from paper_entry_decisions
+            where decision_time >= {KST_TODAY_START_UTC}
+        """,
+        "Opened today (KST)": f"""
+            select count(*) value from paper_entry_decisions
+            where opened=1 and decision_time >= {KST_TODAY_START_UTC}
+        """,
+        "Blocked today (KST)": f"""
+            select count(*) value from paper_entry_decisions
+            where opened=0 and decision_time >= {KST_TODAY_START_UTC}
+        """,
+        "Daily loss limit SOL": """
+            select coalesce(max(daily_loss_limit_sol), 0) value from paper_entry_decisions
+        """,
+    }
+    for col, (label, sql) in zip(cols, decision_metrics.items(), strict=False):
+        df = query(sql)
+        value = df.iloc[0]["value"] if not df.empty else 0
+        col.metric(label, f"{value:.2f}" if "SOL" in label else int(value or 0))
+
+    st.subheader("Blocked Reason Summary")
+    st.dataframe(
+        query(
+            f"""
+            select reason, count(*) as count
+            from paper_entry_decisions
+            where opened=0 and decision_time >= {KST_TODAY_START_UTC}
+            group by reason
+            order by count desc
+            """
+        ),
+        width="stretch",
+    )
+    st.subheader("Recent Entry Decisions")
+    st.dataframe(
+        query(
+            """
+            select datetime(d.decision_time, '+9 hours') as decision_time_kst,
+                   coalesce(ch.title, d.channel_id) as channel_name,
+                   d.token_address, d.opened, d.reason, d.intent,
+                   round(d.final_signal_score, 2) as final_signal_score,
+                   round(d.risk_score, 2) as risk_score,
+                   d.market_cap_usd, d.liquidity_usd,
+                   round(d.daily_loss_sol, 4) as daily_loss_sol,
+                   d.daily_loss_limit_sol,
+                   p.status as position_status,
+                   datetime(m.message_time, '+9 hours') as message_time_kst,
+                   m.raw_text
+            from paper_entry_decisions d
+            left join telegram_channels ch on ch.channel_id=d.channel_id
+            left join paper_positions p on p.id=d.position_id
+            left join telegram_messages m on m.id=d.message_db_id
+            order by d.decision_time desc, d.id desc
+            limit 500
+            """
+        ),
+        width="stretch",
+    )
+
 elif page == "Paper Portfolio":
     st.dataframe(
         query(
@@ -286,20 +349,28 @@ elif page == "Closed Trades":
         cols[0].metric("Realized PnL (SOL)", f"{selected_trade['realized_pnl_sol']:.4f}")
         cols[1].metric(
             "Hold-Through Worst",
-            "-" if pd.isna(selected_trade["hold_through_worst_return_pct"]) else f"{selected_trade['hold_through_worst_return_pct']:.2f}%",
+            "-"
+            if pd.isna(selected_trade["hold_through_worst_return_pct"])
+            else f"{selected_trade['hold_through_worst_return_pct']:.2f}%",
         )
         cols[2].metric(
             "Hold-Through Peak",
-            "-" if pd.isna(selected_trade["hold_through_peak_return_pct"]) else f"{selected_trade['hold_through_peak_return_pct']:.2f}%",
+            "-"
+            if pd.isna(selected_trade["hold_through_peak_return_pct"])
+            else f"{selected_trade['hold_through_peak_return_pct']:.2f}%",
         )
         cols[3].metric(
             "Peak PnL (SOL)",
-            "-" if pd.isna(selected_trade["hold_through_peak_pnl_sol"]) else f"{selected_trade['hold_through_peak_pnl_sol']:.4f}",
+            "-"
+            if pd.isna(selected_trade["hold_through_peak_pnl_sol"])
+            else f"{selected_trade['hold_through_peak_pnl_sol']:.4f}",
         )
     st.dataframe(closed_trades, width="stretch")
 
 elif page == "Channel Performance":
-    st.dataframe(query("select * from channel_performance order by overall_score desc"), width="stretch")
+    st.dataframe(
+        query("select * from channel_performance order by overall_score desc"), width="stretch"
+    )
 
 elif page == "Token Detail":
     token = st.text_input("Token address")
@@ -360,7 +431,9 @@ elif page == "Settings Preview":
             "dry_run": settings.dry_run,
             "database_url": settings.database_url,
             "llm_provider": settings.llm_provider,
-            "llm_model": settings.ollama_model if settings.llm_provider == "ollama" else settings.llm_model,
+            "llm_model": settings.ollama_model
+            if settings.llm_provider == "ollama"
+            else settings.llm_model,
             "llm_review": {
                 "enabled": settings.llm_review_enabled,
                 "model": settings.llm_review_model,
@@ -396,7 +469,15 @@ elif page == "Settings Preview":
             },
         }
     )
-    for config_path in [Path("config/channels.yaml"), Path("config/channels.example.yaml"), Path("config/strategy.yaml"), Path("config/strategy.example.yaml")]:
+    for config_path in [
+        Path("config/channels.yaml"),
+        Path("config/channels.example.yaml"),
+        Path("config/strategy.yaml"),
+        Path("config/strategy.example.yaml"),
+    ]:
         if config_path.exists():
             st.subheader(str(config_path))
-            st.code(yaml.safe_dump(yaml.safe_load(config_path.read_text()) or {}, sort_keys=False), language="yaml")
+            st.code(
+                yaml.safe_dump(yaml.safe_load(config_path.read_text()) or {}, sort_keys=False),
+                language="yaml",
+            )

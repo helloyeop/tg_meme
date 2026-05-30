@@ -1,18 +1,18 @@
 paper:
   initial_balance_sol: 20
   entry_size_sol: 0.5
-  daily_max_loss_sol: 0.5
+  daily_max_loss_sol: 2
   estimated_slippage_pct: 5
   estimated_fees_pct: 1
   max_open_positions: 5
   max_positions_per_channel: 2
 
 entry:
-  final_signal_score_min: 55
-  risk_score_min: 65
+  final_signal_score_min: 45
+  risk_score_min: 60
   max_time_since_first_call_minutes: 5
   max_market_cap_increase_since_first_call_pct: 150
-  min_liquidity_usd: 5000
+  min_liquidity_usd: 1000
   no_warning_in_event: true
   no_sold_message_in_event: true
   no_existing_open_position_same_channel_token: true
@@ -54,7 +54,7 @@ scoring:
     3_to_5_minutes: 0.70
     5_to_15_minutes: 0.45
     15_to_60_minutes: 0.25
-    over_60_minutes: 0.10
+    over_60_minutes: 0.20
   market_cap_position_factor:
     below_or_equal_first_call: 1.00
     up_0_to_30_pct: 0.90
@@ -64,9 +64,9 @@ scoring:
     up_over_300_pct: 0.05
   ca_count_factor:
     1: 1.00
-    2: 0.80
-    3: 0.65
-    4_or_more: 0.40
+    2: 0.90
+    3: 0.75
+    4_or_more: 0.50
   risk_penalties:
     liquidity_under_5000_usd: 25
     top10_holder_ratio_over_45_pct: 25

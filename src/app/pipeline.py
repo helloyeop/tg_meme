@@ -5,13 +5,20 @@ from sqlalchemy import func, select
 
 from app.settings import get_settings
 from data_sources.aggregator import DataSourceAggregator
-from db.models import ChannelPerformance, PaperPosition, TelegramMessage, TokenCallEvent, TokenMarketSnapshot
+from db.models import (
+    ChannelPerformance,
+    PaperPosition,
+    TelegramMessage,
+    TokenCallEvent,
+    TokenMarketSnapshot,
+)
 from db.repositories import (
     log_app_error,
     store_context_links,
     store_extracted_addresses,
     store_market_snapshot,
     store_message_analysis,
+    store_paper_entry_decision,
     store_security_snapshot,
 )
 from db.session import SessionLocal
@@ -46,7 +53,9 @@ class MessagePipeline:
                 message_id = message.id
                 try:
                     addresses = extract_solana_addresses(message.raw_text)
-                    store_extracted_addresses(session, message_db_id=message.id, addresses=addresses)
+                    store_extracted_addresses(
+                        session, message_db_id=message.id, addresses=addresses
+                    )
                     context = ContextResolution(None, [])
                     settings = get_settings()
                     if addresses and settings.context_linking_enabled:
@@ -62,7 +71,9 @@ class MessagePipeline:
                     )
                     if context.relation:
                         classification.context_relation = context.relation
-                        classification.context_message_ids = [candidate.id for candidate in context.candidates]
+                        classification.context_message_ids = [
+                            candidate.id for candidate in context.candidates
+                        ]
                     if linked_message:
                         classification.context_linked = True
                         classification.context_confidence = classification.confidence
@@ -97,12 +108,20 @@ class MessagePipeline:
                             analysis=analysis,
                             first_seen_price_usd=market_data.price_usd if market_data else None,
                             first_seen_fdv_usd=market_data.fdv_usd if market_data else None,
-                            first_seen_market_cap_usd=market_data.market_cap_usd if market_data else None,
-                            first_seen_liquidity_usd=market_data.liquidity_usd if market_data else None,
-                            actionable_market_cap_usd=market_data.market_cap_usd if market_data else None,
+                            first_seen_market_cap_usd=market_data.market_cap_usd
+                            if market_data
+                            else None,
+                            first_seen_liquidity_usd=market_data.liquidity_usd
+                            if market_data
+                            else None,
+                            actionable_market_cap_usd=market_data.market_cap_usd
+                            if market_data
+                            else None,
                         )
                         channel_perf = session.scalar(
-                            select(ChannelPerformance).where(ChannelPerformance.channel_id == event.channel_id)
+                            select(ChannelPerformance).where(
+                                ChannelPerformance.channel_id == event.channel_id
+                            )
                         )
                         score = self.scoring.score(
                             event=event,
@@ -113,11 +132,20 @@ class MessagePipeline:
                             ca_count=len(addresses) or 1,
                         )
                         self.scoring.persist(session, event.id, score)
-                        self.paper.maybe_open_position(
+                        decision = self.paper.maybe_open_position(
                             session,
                             event=event,
                             score=score,
                             market_data=market_data,
+                        )
+                        store_paper_entry_decision(
+                            session,
+                            event=event,
+                            message=message,
+                            analysis=analysis,
+                            score=score,
+                            market_data=market_data,
+                            decision=decision,
                         )
                     session.commit()
                     processed += 1
@@ -137,7 +165,9 @@ class MessagePipeline:
                 .order_by(TokenCallEvent.updated_at.asc(), TokenCallEvent.id.asc())
             )
             if not force:
-                cutoff = datetime.utcnow() - timedelta(seconds=get_settings().open_event_refresh_seconds)
+                cutoff = datetime.utcnow() - timedelta(
+                    seconds=get_settings().open_event_refresh_seconds
+                )
                 latest_snapshot_time = (
                     select(func.max(TokenMarketSnapshot.snapshot_time))
                     .where(
@@ -222,12 +252,16 @@ class MessagePipeline:
                 query = query.where(
                     (latest_snapshot_time.is_(None)) | (latest_snapshot_time <= cutoff)
                 )
-            token_addresses = session.scalars(query.limit(settings.paper_fast_monitor_max_tokens)).all()
+            token_addresses = session.scalars(
+                query.limit(settings.paper_fast_monitor_max_tokens)
+            ).all()
             if not token_addresses:
                 return 0
 
             try:
-                market_by_token = self.data_sources.dexscreener.get_tokens_market_data(token_addresses)
+                market_by_token = self.data_sources.dexscreener.get_tokens_market_data(
+                    token_addresses
+                )
                 for token_address in token_addresses:
                     market_data = market_by_token.get(token_address)
                     if market_data is None:
@@ -264,7 +298,9 @@ class MessagePipeline:
                 session.commit()
             except Exception as exc:
                 session.rollback()
-                log_app_error(session, "position_fast_refresh", exc, {"token_addresses": token_addresses})
+                log_app_error(
+                    session, "position_fast_refresh", exc, {"token_addresses": token_addresses}
+                )
                 session.commit()
                 logger.exception("Failed to fast refresh positions for %s", token_addresses)
         return refreshed
@@ -302,7 +338,9 @@ class MessagePipeline:
             try:
                 if token_addresses:
                     requested_tokens = token_addresses[: settings.paper_closed_monitor_max_tokens]
-                    market_by_token = self.data_sources.dexscreener.get_tokens_market_data(requested_tokens)
+                    market_by_token = self.data_sources.dexscreener.get_tokens_market_data(
+                        requested_tokens
+                    )
                     for token_address in requested_tokens:
                         market_data = market_by_token.get(token_address)
                         if market_data is None:
@@ -332,7 +370,9 @@ class MessagePipeline:
                 return tracked
             except Exception as exc:
                 session.rollback()
-                log_app_error(session, "closed_position_refresh", exc, {"token_addresses": token_addresses})
+                log_app_error(
+                    session, "closed_position_refresh", exc, {"token_addresses": token_addresses}
+                )
                 session.commit()
                 logger.exception("Failed to refresh closed positions for %s", token_addresses)
                 return 0
