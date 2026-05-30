@@ -54,5 +54,37 @@ set_if_missing PAPER_CLOSED_MONITOR_SECONDS 900
 set_if_missing PAPER_CLOSED_MONITOR_MAX_TOKENS 30
 set_if_missing DEXSCREENER_REQUEST_BUDGET_PER_MINUTE 240
 
+python3 - "$ENV_FILE" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines()
+selected: dict[str, str] = {}
+for line in lines:
+    match = re.match(r"^([A-Z0-9_]+)=(.*)$", line)
+    if not match:
+        continue
+    key, value = match.groups()
+    if key not in selected or value:
+        selected[key] = value
+
+seen: set[str] = set()
+normalized: list[str] = []
+for line in lines:
+    match = re.match(r"^([A-Z0-9_]+)=(.*)$", line)
+    if not match:
+        normalized.append(line)
+        continue
+    key = match.group(1)
+    if key in seen:
+        continue
+    seen.add(key)
+    normalized.append(f"{key}={selected[key]}")
+
+path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
+PY
+
 chmod 600 "$ENV_FILE"
 echo "Reconciled $ENV_FILE without changing existing secret values."
