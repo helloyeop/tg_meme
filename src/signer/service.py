@@ -229,7 +229,8 @@ def require_auth(authorization: str | None = Header(default=None)) -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "wallet": get_settings().live_wallet_public_key}
+    runtime = SignerRuntime()
+    return {"status": "ok", "wallet": str(runtime.keypair.pubkey())}
 
 
 @app.post("/swap", dependencies=[Depends(require_auth)])
