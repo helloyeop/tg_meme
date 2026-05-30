@@ -68,6 +68,10 @@ class SignerRuntime:
         cap = int(float(self.strategy.get("max_entry_size_sol", 0.5)) * LAMPORTS_PER_SOL)
         if amount > cap:
             raise HTTPException(400, "Requested BUY exceeds signer entry cap.")
+        balance = self.sol_balance_lamports()
+        reserve = int(self.settings.live_fee_reserve_sol * LAMPORTS_PER_SOL)
+        if amount + reserve > balance:
+            raise HTTPException(400, "Requested BUY exceeds available SOL after fee reserve.")
         daily_limit = int(
             float(self.strategy.get("daily_max_buy_sol", 1)) * LAMPORTS_PER_SOL
         )
@@ -82,6 +86,24 @@ class SignerRuntime:
             ).fetchone()[0]
         if spent + amount > daily_limit:
             raise HTTPException(400, "Requested BUY exceeds signer daily spend cap.")
+
+    def sol_balance_lamports(self) -> int:
+        rpc_url = self.settings.helius_rpc_url or self.settings.solana_rpc_url
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                rpc_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getBalance",
+                    "params": [str(self.keypair.pubkey()), {"commitment": "confirmed"}],
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        if payload.get("error"):
+            raise RuntimeError(f"Solana RPC getBalance failed: {payload['error']}")
+        return int(payload["result"]["value"])
 
     def _validate_sell(self, token_address: str, amount: int) -> None:
         with sqlite3.connect(self.ledger_path) as connection:
@@ -231,6 +253,26 @@ def require_auth(authorization: str | None = Header(default=None)) -> None:
 def health() -> dict:
     runtime = SignerRuntime()
     return {"status": "ok", "wallet": str(runtime.keypair.pubkey())}
+
+
+@app.get("/readiness")
+def readiness() -> dict:
+    runtime = SignerRuntime()
+    balance_lamports = runtime.sol_balance_lamports()
+    entry_lamports = int(
+        float(runtime.strategy.get("entry_size_sol", 0.5)) * LAMPORTS_PER_SOL
+    )
+    reserve_lamports = int(runtime.settings.live_fee_reserve_sol * LAMPORTS_PER_SOL)
+    return {
+        "status": "ready" if balance_lamports >= entry_lamports + reserve_lamports else "waiting",
+        "wallet": str(runtime.keypair.pubkey()),
+        "balance_lamports": balance_lamports,
+        "balance_sol": balance_lamports / LAMPORTS_PER_SOL,
+        "entry_size_sol": entry_lamports / LAMPORTS_PER_SOL,
+        "fee_reserve_sol": reserve_lamports / LAMPORTS_PER_SOL,
+        "jupiter_api_key_configured": bool(runtime.settings.jupiter_api_key),
+        "live_execution_adapter": runtime.settings.live_execution_adapter,
+    }
 
 
 @app.post("/swap", dependencies=[Depends(require_auth)])

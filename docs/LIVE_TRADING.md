@@ -28,6 +28,7 @@ LIVE_WALLET_PUBLIC_KEY=FFDuhHWsDuoUrFAY3Ggk8gty8EeNjArrXLC21UcULvvh
 LIVE_SIGNER_BASE_URL=http://signer:8787
 LIVE_SIGNER_AUTH_TOKEN=
 LIVE_SIGNER_KEYPAIR_PATH=/run/wallet-secrets/live-wallet.json
+LIVE_FEE_RESERVE_SOL=0.05
 JUPITER_API_KEY=
 JUPITER_SWAP_BASE_URL=https://api.jup.ag/swap/v2
 ```
@@ -114,6 +115,19 @@ docker compose exec -T signer python -m signer.quote_qa
 This sends a `0.5 SOL -> USDC` quote request without a `taker`. Jupiter returns
 quote data without a signable transaction. The command refuses the result if a
 transaction is unexpectedly returned. It never calls `/execute`.
+
+## Balance Readiness
+
+Check the dedicated wallet balance after funding:
+
+```bash
+cd /opt/memetrading
+docker compose exec -T signer curl -fsS http://localhost:8787/readiness
+```
+
+The signer calls Solana RPC `getBalance` with `confirmed` commitment. A live BUY
+is refused unless the wallet contains the requested amount plus the configured
+`LIVE_FEE_RESERVE_SOL`. The default reserve is `0.05 SOL`.
 
 ## Operational Record
 

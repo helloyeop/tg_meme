@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -12,6 +13,8 @@ def runtime_with_ledger(path: Path) -> SignerRuntime:
         "max_entry_size_sol": 0.5,
         "daily_max_buy_sol": 1,
     }
+    runtime.settings = SimpleNamespace(live_fee_reserve_sol=0.05)
+    runtime.sol_balance_lamports = lambda: 2_000_000_000
     runtime.ledger_path = path
     runtime._init_ledger()
     return runtime
@@ -52,3 +55,11 @@ def test_signer_rejects_buy_above_entry_cap(tmp_path: Path) -> None:
 
     with pytest.raises(HTTPException, match="entry cap"):
         runtime._validate_buy(500_000_001)
+
+
+def test_signer_rejects_buy_when_balance_cannot_cover_fee_reserve(tmp_path: Path) -> None:
+    runtime = runtime_with_ledger(tmp_path / "signer.db")
+    runtime.sol_balance_lamports = lambda: 549_999_999
+
+    with pytest.raises(HTTPException, match="fee reserve"):
+        runtime._validate_buy(500_000_000)

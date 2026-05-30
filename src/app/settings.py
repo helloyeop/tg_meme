@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     live_signer_base_url: str = "http://signer:8787"
     live_signer_auth_token: str | None = None
     live_signer_keypair_path: Path = Path("/run/wallet-secrets/live-wallet.json")
+    live_fee_reserve_sol: float = 0.05
 
     database_url: str = "sqlite:///./data/app.db"
     store_market_snapshot_raw_json: bool = False

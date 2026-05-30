@@ -43,6 +43,7 @@ set_if_missing CONTEXT_LINK_WINDOW_SECONDS 60
 set_if_missing GMGN_CLI_PATH /app/node_modules/.bin/gmgn-cli
 set_if_missing JUPITER_API_KEY ""
 set_if_missing JUPITER_SWAP_BASE_URL https://api.jup.ag/swap/v2
+set_if_missing LIVE_FEE_RESERVE_SOL 0.05
 set_if_missing STORE_MARKET_SNAPSHOT_RAW_JSON false
 set_if_missing STORE_SECURITY_SNAPSHOT_RAW_JSON false
 set_if_missing OPEN_EVENT_REFRESH_SECONDS 300
