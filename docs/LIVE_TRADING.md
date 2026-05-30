@@ -151,6 +151,12 @@ ledger before `/execute`. If the network disconnects while the submission
 result is unknown, retrying the same `client_order_id` resumes the same signed
 transaction instead of assembling a duplicate swap.
 
+For take-profit exits, the pipeline sends a minimum SOL output to the signer.
+The signer refuses to execute the SELL if Jupiter's output quote is below the
+position's configured profit target. Emergency stop-loss exits intentionally do
+not apply this minimum. Live realized PnL uses actual wallet lamport changes
+when available, including network fees and token-account rent.
+
 ## Enable And Emergency Stop
 
 After the manual round-trip QA succeeds, enable automated live trading:

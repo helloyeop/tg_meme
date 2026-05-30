@@ -376,6 +376,8 @@ class LivePosition(TimestampMixin, Base):
     token_amount_raw: Mapped[str | None] = mapped_column(String)
     entry_input_lamports: Mapped[str | None] = mapped_column(String)
     exit_output_lamports: Mapped[str | None] = mapped_column(String)
+    entry_wallet_delta_lamports: Mapped[str | None] = mapped_column(String)
+    exit_wallet_delta_lamports: Mapped[str | None] = mapped_column(String)
     exit_requested_time: Mapped[datetime | None] = mapped_column(DateTime)
     exit_confirmed_time: Mapped[datetime | None] = mapped_column(DateTime)
     realized_pnl_sol: Mapped[float] = mapped_column(Float, default=0)

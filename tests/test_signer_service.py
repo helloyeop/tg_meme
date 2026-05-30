@@ -86,3 +86,16 @@ def test_signer_resumes_pending_submission_with_same_request_id(tmp_path: Path) 
 
     assert result["status"] == "Success"
     assert result["signature"] == "signed:request-id"
+
+
+def test_signer_ledger_migrates_minimum_output_column(tmp_path: Path) -> None:
+    runtime = runtime_with_ledger(tmp_path / "signer.db")
+
+    import sqlite3
+
+    with sqlite3.connect(runtime.ledger_path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(swaps)").fetchall()
+        }
+
+    assert "min_output_amount" in columns

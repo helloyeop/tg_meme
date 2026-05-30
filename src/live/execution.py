@@ -88,7 +88,13 @@ class SignerClient:
         self.settings = settings or get_settings()
 
     def execute(
-        self, *, client_order_id: str, side: str, token_address: str, amount: int
+        self,
+        *,
+        client_order_id: str,
+        side: str,
+        token_address: str,
+        amount: int,
+        min_output_amount: int | None = None,
     ) -> dict:
         if self.settings.live_execution_adapter != "signer_service":
             raise LiveExecutionDisabled("Signer service execution is disabled.")
@@ -103,6 +109,7 @@ class SignerClient:
                     "side": side,
                     "token_address": token_address,
                     "amount": amount,
+                    "min_output_amount": min_output_amount,
                 },
             )
             response.raise_for_status()
@@ -144,6 +151,7 @@ class LiveOrderExecutor:
                     side=order.side,
                     token_address=order.token_address,
                     amount=amount,
+                    min_output_amount=self._min_output_amount(order, position),
                 )
             except Exception as exc:
                 order.status = "STAGED"
@@ -162,14 +170,17 @@ class LiveOrderExecutor:
                 position.status = "OPEN"
                 position.entry_input_lamports = str(amount)
                 position.token_amount_raw = str(payload.get("output_amount") or "")
+                position.entry_wallet_delta_lamports = str(
+                    payload.get("wallet_balance_delta_lamports") or ""
+                )
             else:
                 position.status = "CLOSED"
                 position.exit_confirmed_time = order.requested_at
                 position.exit_output_lamports = str(payload.get("output_amount") or "")
-                position.realized_pnl_sol = (
-                    int(position.exit_output_lamports or 0)
-                    - int(position.entry_input_lamports or 0)
-                ) / LAMPORTS_PER_SOL
+                position.exit_wallet_delta_lamports = str(
+                    payload.get("wallet_balance_delta_lamports") or ""
+                )
+                position.realized_pnl_sol = self._realized_pnl_sol(position)
             self._send_alert(order, position)
             executed += 1
         return executed
@@ -180,6 +191,26 @@ class LiveOrderExecutor:
         if order.side == "SELL" and position.token_amount_raw:
             return int(position.token_amount_raw)
         return None
+
+    def _min_output_amount(self, order: LiveOrder, position: LivePosition) -> int | None:
+        if order.side != "SELL" or not order.reason.startswith("take_profit"):
+            return None
+        if not position.entry_input_lamports:
+            return None
+        return int(
+            int(position.entry_input_lamports) * (1 + position.target_profit_pct / 100)
+        )
+
+    def _realized_pnl_sol(self, position: LivePosition) -> float:
+        if position.entry_wallet_delta_lamports and position.exit_wallet_delta_lamports:
+            return (
+                int(position.entry_wallet_delta_lamports)
+                + int(position.exit_wallet_delta_lamports)
+            ) / LAMPORTS_PER_SOL
+        return (
+            int(position.exit_output_lamports or 0)
+            - int(position.entry_input_lamports or 0)
+        ) / LAMPORTS_PER_SOL
 
     def _send_alert(self, order: LiveOrder, position: LivePosition) -> None:
         try:

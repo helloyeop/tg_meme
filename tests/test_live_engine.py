@@ -211,3 +211,15 @@ def test_live_executor_confirms_buy_without_touching_paper_ledger() -> None:
     assert position.status == "OPEN"
     assert position.entry_input_lamports == "500000000"
     assert position.token_amount_raw == "123"
+
+
+def test_live_take_profit_sell_requires_ten_percent_jupiter_output() -> None:
+    position = SimpleNamespace(
+        entry_input_lamports="500000000",
+        target_profit_pct=10,
+    )
+    order = SimpleNamespace(side="SELL", reason="take_profit_10_pct")
+
+    minimum = LiveOrderExecutor(live_settings())._min_output_amount(order, position)
+
+    assert minimum == 550000000

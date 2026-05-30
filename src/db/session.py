@@ -100,6 +100,8 @@ def _migrate_market_cap_columns() -> None:
             "token_amount_raw": "VARCHAR",
             "entry_input_lamports": "VARCHAR",
             "exit_output_lamports": "VARCHAR",
+            "entry_wallet_delta_lamports": "VARCHAR",
+            "exit_wallet_delta_lamports": "VARCHAR",
         },
     }
     inspector = inspect(engine)

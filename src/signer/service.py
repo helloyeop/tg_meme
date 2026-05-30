@@ -22,6 +22,7 @@ class SwapRequest(BaseModel):
     side: str
     token_address: str = Field(min_length=32, max_length=64)
     amount: int = Field(gt=0)
+    min_output_amount: int | None = Field(default=None, gt=0)
 
 
 class SignerRuntime:
@@ -61,7 +62,9 @@ class SignerRuntime:
 
         self._reserve(side, request)
         try:
-            order = self._get_order(input_mint, output_mint, request.amount)
+            order = self._get_order(
+                input_mint, output_mint, request.amount, request.min_output_amount
+            )
             signed_transaction = self._sign(order["transaction"])
             self._store_pending_execution(
                 request.client_order_id, order["requestId"], signed_transaction
@@ -81,6 +84,7 @@ class SignerRuntime:
         request_id: str,
         order: dict,
     ) -> dict:
+        balance_before = self.sol_balance_lamports()
         try:
             execution = self._execute_order(signed_transaction, request_id)
         except Exception as exc:
@@ -88,6 +92,7 @@ class SignerRuntime:
                 503,
                 "Swap submission outcome is unknown. Retry the same client_order_id.",
             ) from exc
+        balance_after = self.sol_balance_lamports()
         result = {
             "status": execution.get("status"),
             "signature": execution.get("signature"),
@@ -95,6 +100,7 @@ class SignerRuntime:
             "input_amount": execution.get("inputAmountResult") or order.get("inAmount"),
             "output_amount": execution.get("outputAmountResult") or order.get("outAmount"),
             "error": execution.get("error"),
+            "wallet_balance_delta_lamports": balance_after - balance_before,
         }
         self._record(side, request, result)
         return result
@@ -155,7 +161,13 @@ class SignerRuntime:
         if amount > inventory:
             raise HTTPException(400, "Requested SELL exceeds signer token inventory.")
 
-    def _get_order(self, input_mint: str, output_mint: str, amount: int) -> dict:
+    def _get_order(
+        self,
+        input_mint: str,
+        output_mint: str,
+        amount: int,
+        min_output_amount: int | None = None,
+    ) -> dict:
         headers = {"x-api-key": self.settings.jupiter_api_key or ""}
         params = {
             "inputMint": input_mint,
@@ -180,6 +192,10 @@ class SignerRuntime:
             or not order.get("requestId")
         ):
             raise HTTPException(502, "Jupiter returned an invalid swap order.")
+        if order.get("outAmount") is None:
+            raise HTTPException(502, "Jupiter returned an order without an output amount.")
+        if min_output_amount is not None and int(order["outAmount"]) < min_output_amount:
+            raise HTTPException(409, "Jupiter output quote is below the requested minimum.")
         return order
 
     def _sign(self, transaction: str) -> str:
@@ -209,8 +225,8 @@ class SignerRuntime:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 """
-                SELECT status, side, token_address, amount, raw_json, request_id,
-                       signed_transaction
+                SELECT status, side, token_address, amount, min_output_amount, raw_json,
+                       request_id, signed_transaction
                 FROM swaps
                 WHERE client_order_id=?
                 """,
@@ -223,6 +239,7 @@ class SignerRuntime:
             existing["side"] != request.side.upper()
             or existing["token_address"] != request.token_address
             or existing["amount"] != request.amount
+            or existing["min_output_amount"] != request.min_output_amount
         ):
             raise HTTPException(409, "client_order_id was reused with different swap details.")
         return existing
@@ -231,8 +248,11 @@ class SignerRuntime:
         with sqlite3.connect(self.ledger_path) as connection:
             connection.execute(
                 """
-                INSERT INTO swaps(client_order_id, trade_day, side, token_address, amount, status)
-                VALUES (?, ?, ?, ?, ?, 'PENDING')
+                INSERT INTO swaps(
+                    client_order_id, trade_day, side, token_address, amount,
+                    min_output_amount, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'PENDING')
                 """,
                 (
                     request.client_order_id,
@@ -240,6 +260,7 @@ class SignerRuntime:
                     side,
                     request.token_address,
                     request.amount,
+                    request.min_output_amount,
                 ),
             )
 
@@ -296,6 +317,7 @@ class SignerRuntime:
                     side TEXT NOT NULL,
                     token_address TEXT NOT NULL,
                     amount INTEGER NOT NULL,
+                    min_output_amount INTEGER,
                     status TEXT,
                     signature TEXT,
                     request_id TEXT,
@@ -314,6 +336,8 @@ class SignerRuntime:
                 connection.execute("ALTER TABLE swaps ADD COLUMN request_id TEXT")
             if "signed_transaction" not in columns:
                 connection.execute("ALTER TABLE swaps ADD COLUMN signed_transaction TEXT")
+            if "min_output_amount" not in columns:
+                connection.execute("ALTER TABLE swaps ADD COLUMN min_output_amount INTEGER")
 
     @staticmethod
     def _load_keypair(path: Path) -> Keypair:
