@@ -397,9 +397,14 @@ elif page == "Live Messages":
     st.dataframe(
         query(
             """
+            with latest_market as (
+              select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+              from token_market_snapshots
+            )
             select datetime(m.message_time, '+9 hours') as message_time_kst,
                    coalesce(ch.title, m.channel_id) as channel_name,
-                   m.raw_text, a.token_address, ma.intent,
+                   m.raw_text, a.token_address, lm.symbol as token_symbol,
+                   lm.name as token_name, ma.intent,
                    ma.confidence, ma.llm_provider, ma.model_name,
                    ma.initial_model_name, ma.review_model_name, ma.was_reviewed,
                    ma.total_tokens, ma.latency_ms,
@@ -409,6 +414,7 @@ elif page == "Live Messages":
             from telegram_messages m
             left join telegram_channels ch on ch.channel_id=m.channel_id
             left join extracted_addresses a on a.message_db_id=m.id
+            left join latest_market lm on lm.token_address=a.token_address and lm.row_num=1
             left join message_analysis ma on ma.message_db_id=m.id
             order by m.message_time desc
             limit 300
@@ -421,9 +427,14 @@ elif page == "Context Links":
     st.dataframe(
         query(
             """
+            with latest_market as (
+              select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+              from token_market_snapshots
+            )
             select datetime(target.message_time, '+9 hours') as target_time_kst,
                    coalesce(ch.title, target.channel_id) as channel_name,
-                   links.token_address, links.context_type,
+                   links.token_address, lm.symbol as token_symbol,
+                   lm.name as token_name, links.context_type,
                    round(links.context_delay_seconds, 1) as delay_seconds,
                    links.classification_intent, links.classification_confidence,
                    context.raw_text as preceding_context,
@@ -432,6 +443,7 @@ elif page == "Context Links":
             join telegram_messages context on context.id=links.context_message_db_id
             join telegram_messages target on target.id=links.target_message_db_id
             left join telegram_channels ch on ch.channel_id=target.channel_id
+            left join latest_market lm on lm.token_address=links.token_address and lm.row_num=1
             order by links.created_at desc, links.id desc
             limit 300
             """
@@ -460,7 +472,8 @@ elif page == "Call Events":
             select datetime(e.first_seen_time, '+9 hours') as first_seen_time_kst,
                    datetime(e.first_actionable_call_time, '+9 hours') as first_actionable_call_time_kst,
                    coalesce(ch.title, e.channel_id) as channel_name,
-                   e.token_address, e.current_status, e.call_count,
+                   e.token_address, m.symbol as token_symbol, m.name as token_name,
+                   e.current_status, e.call_count,
                    e.bullish_update_count, e.warning_count, e.sold_count,
                    e.first_seen_market_cap_usd,
                    e.first_actionable_market_cap_usd, e.actionable_context_type,
@@ -535,7 +548,8 @@ elif page == "Entry Decisions":
             """
             select datetime(d.decision_time, '+9 hours') as decision_time_kst,
                    coalesce(ch.title, d.channel_id) as channel_name,
-                   d.token_address, d.opened, d.reason, d.intent,
+                   d.token_address, lm.symbol as token_symbol,
+                   lm.name as token_name, d.opened, d.reason, d.intent,
                    round(d.final_signal_score, 2) as final_signal_score,
                    round(d.risk_score, 2) as risk_score,
                    d.market_cap_usd, d.liquidity_usd,
@@ -548,6 +562,10 @@ elif page == "Entry Decisions":
             left join telegram_channels ch on ch.channel_id=d.channel_id
             left join paper_positions p on p.id=d.position_id
             left join telegram_messages m on m.id=d.message_db_id
+            left join (
+              select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+              from token_market_snapshots
+            ) lm on lm.token_address=d.token_address and lm.row_num=1
             order by d.decision_time desc, d.id desc
             limit 500
             """
@@ -564,7 +582,8 @@ elif page == "Paper Portfolio":
               from token_market_snapshots
             )
             select p.id, p.event_id, coalesce(ch.title, p.channel_id) as channel_name,
-                   p.token_address, p.status,
+                   p.token_address, m.symbol as token_symbol, m.name as token_name,
+                   p.status,
                    datetime(entry_time, '+9 hours') as entry_time_kst,
                    entry_market_cap_usd, entry_size_sol, remaining_ratio,
                    m.market_cap_usd as current_market_cap_usd,
@@ -585,8 +604,13 @@ elif page == "Paper Portfolio":
 elif page == "Closed Trades":
     closed_trades = query(
         """
+        with latest_market as (
+          select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+          from token_market_snapshots
+        )
         select p.id, p.event_id, coalesce(ch.title, p.channel_id) as channel_name,
-               p.token_address, p.status,
+               p.token_address, lm.symbol as token_symbol, lm.name as token_name,
+               p.status,
                datetime(entry_time, '+9 hours') as entry_time_kst,
                datetime(exit_time, '+9 hours') as exit_time_kst,
                entry_market_cap_usd,
@@ -616,6 +640,7 @@ elif page == "Closed Trades":
                p.post_exit_snapshot_count
         from paper_positions p
         left join telegram_channels ch on ch.channel_id=p.channel_id
+        left join latest_market lm on lm.token_address=p.token_address and lm.row_num=1
         where p.status not in ('OPEN','PARTIALLY_CLOSED')
         order by p.exit_time desc
         """,
@@ -665,7 +690,12 @@ elif page == "Token Detail":
         st.dataframe(
             query(
                 """
-                select e.id, coalesce(ch.title, e.channel_id) as channel_name, e.token_address,
+                with latest_market as (
+                  select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+                  from token_market_snapshots
+                )
+                select e.id, coalesce(ch.title, e.channel_id) as channel_name,
+                       e.token_address, lm.symbol as token_symbol, lm.name as token_name,
                        datetime(first_seen_time, '+9 hours') as first_seen_time_kst,
                        datetime(first_actionable_call_time, '+9 hours') as first_actionable_call_time_kst,
                        first_seen_market_cap_usd, latest_market_cap_usd,
@@ -676,6 +706,7 @@ elif page == "Token Detail":
                        warning_count, sold_count
                 from token_call_events e
                 left join telegram_channels ch on ch.channel_id=e.channel_id
+                left join latest_market lm on lm.token_address=e.token_address and lm.row_num=1
                 where e.token_address=:token
                 """,
                 {"token": token},
