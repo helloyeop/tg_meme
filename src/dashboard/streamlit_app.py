@@ -9,7 +9,6 @@ from app.settings import get_settings
 from db.session import create_db_engine
 
 st.set_page_config(page_title="Memecoin Telegram Call Bot", layout="wide")
-st.title("Memecoin Telegram Call Bot")
 
 settings = get_settings()
 engine = create_db_engine(settings.database_url)
@@ -24,6 +23,266 @@ sell_slippage_factor = 1 - paper_rules.get("estimated_slippage_pct", 5) / 100
 KST_TODAY_START_UTC = "datetime('now', '+9 hours', 'start of day', '-9 hours')"
 
 
+PAGE_META = {
+    "Overview": (
+        "System overview",
+        "Collector health, LLM throughput, data freshness, and current paper exposure.",
+    ),
+    "Live Messages": (
+        "Message stream",
+        "Recent Telegram messages with extracted CA, LLM interpretation, and context links.",
+    ),
+    "Context Links": (
+        "Context links",
+        "CA-only posts matched to nearby explanatory messages in the same channel.",
+    ),
+    "Call Events": (
+        "Call events",
+        "Merged channel/token calls with score, market cap movement, and inferred entry status.",
+    ),
+    "Entry Decisions": (
+        "Entry decisions",
+        "The exact paper-trading decision stored when a token candidate was evaluated.",
+    ),
+    "Paper Portfolio": (
+        "Paper portfolio",
+        "Open and partially closed paper positions monitored against market cap.",
+    ),
+    "Closed Trades": (
+        "Closed trades",
+        "Realized exits compared with post-exit hold-through outcomes.",
+    ),
+    "Channel Performance": (
+        "Channel performance",
+        "Channel-level quality scores and realized paper-trading performance.",
+    ),
+    "Token Detail": (
+        "Token detail",
+        "Focused event, market, and wallet activity lookup for one Solana CA.",
+    ),
+    "Settings Preview": (
+        "Settings preview",
+        "Runtime configuration and local YAML files currently driving the app.",
+    ),
+}
+
+
+def apply_theme() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --bg: #f5f7f4;
+            --surface: #ffffff;
+            --surface-muted: #eef2ed;
+            --ink: #17201b;
+            --ink-soft: #425149;
+            --muted: #69766f;
+            --line: #d9e0da;
+            --accent: #20735f;
+            --accent-soft: #dceee8;
+            --warning: #986b1d;
+            --danger: #9a3f3f;
+            --success: #20735f;
+            --info: #315f86;
+            --radius: 8px;
+            --shadow-sm: 0 1px 2px rgba(23, 32, 27, 0.06);
+        }
+
+        .stApp {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        }
+
+        [data-testid="stSidebar"] {
+            background: #101815;
+            border-right: 1px solid #22312b;
+        }
+
+        [data-testid="stSidebar"] * {
+            color: #e6eee9;
+        }
+
+        [data-testid="stSidebar"] [role="radiogroup"] label {
+            border-radius: var(--radius);
+            margin: 2px 0;
+            padding: 2px 6px;
+            transition: background 160ms ease-out, color 160ms ease-out;
+        }
+
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover {
+            background: #1d2a25;
+        }
+
+        [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+            background: #dceee8;
+        }
+
+        [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) * {
+            color: #10251f;
+            font-weight: 650;
+        }
+
+        .block-container {
+            max-width: 1560px;
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            align-items: flex-start;
+            padding: 0 0 22px;
+            border-bottom: 1px solid var(--line);
+            margin-bottom: 20px;
+        }
+
+        .app-title {
+            margin: 0;
+            color: var(--ink);
+            font-size: 1.55rem;
+            line-height: 1.2;
+            font-weight: 760;
+            letter-spacing: 0;
+        }
+
+        .page-title {
+            margin: 4px 0 0;
+            color: var(--ink-soft);
+            font-size: 1.02rem;
+            line-height: 1.4;
+            font-weight: 600;
+        }
+
+        .page-description {
+            max-width: 72ch;
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 0.92rem;
+            line-height: 1.55;
+        }
+
+        .status-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 8px;
+            min-width: 280px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 4px 9px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: var(--surface);
+            color: var(--ink-soft);
+            font-size: 0.78rem;
+            font-weight: 650;
+            box-shadow: var(--shadow-sm);
+            white-space: nowrap;
+        }
+
+        .status-pill.good {
+            border-color: #bad8ce;
+            background: var(--accent-soft);
+            color: #164d40;
+        }
+
+        .status-pill.warn {
+            border-color: #e5d3a8;
+            background: #fbf2d8;
+            color: #6f4d12;
+        }
+
+        div[data-testid="stMetric"] {
+            min-height: 104px;
+            padding: 15px 16px 13px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
+        }
+
+        div[data-testid="stMetricLabel"] p {
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 650;
+        }
+
+        div[data-testid="stMetricValue"] {
+            color: var(--ink);
+            font-size: 1.55rem;
+            font-weight: 760;
+        }
+
+        h2, h3 {
+            color: var(--ink);
+            letter-spacing: 0;
+        }
+
+        h3 {
+            margin-top: 1.4rem;
+            font-size: 1rem;
+            font-weight: 720;
+        }
+
+        [data-testid="stDataFrame"] {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            overflow: hidden;
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
+        }
+
+        [data-testid="stAlert"] {
+            border-radius: var(--radius);
+        }
+
+        .stTextInput input,
+        .stSelectbox [data-baseweb="select"] {
+            border-radius: var(--radius);
+        }
+
+        div[data-testid="stJson"],
+        pre {
+            border-radius: var(--radius) !important;
+            border: 1px solid var(--line);
+        }
+
+        @media (max-width: 800px) {
+            .block-container {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+
+            .app-header {
+                display: block;
+            }
+
+            .status-row {
+                justify-content: flex-start;
+                margin-top: 14px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def query(sql: str, params: dict | None = None) -> pd.DataFrame:
     try:
         return pd.read_sql_query(text(sql), engine, params=params or {})
@@ -32,8 +291,34 @@ def query(sql: str, params: dict | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def render_header(current_page: str) -> None:
+    page_title, description = PAGE_META[current_page]
+    dry_run_class = "good" if settings.dry_run else "warn"
+    dry_run_label = "DRY RUN" if settings.dry_run else "LIVE BLOCKED"
+    st.markdown(
+        f"""
+        <div class="app-header">
+            <div>
+                <h1 class="app-title">Memecoin Telegram Call Bot</h1>
+                <div class="page-title">{page_title}</div>
+                <p class="page-description">{description}</p>
+            </div>
+            <div class="status-row" aria-label="Runtime status">
+                <span class="status-pill {dry_run_class}">{dry_run_label}</span>
+                <span class="status-pill">{settings.llm_provider} / {settings.llm_model}</span>
+                <span class="status-pill">{paper_rules.get("entry_size_sol", 0.5)} SOL entries</span>
+                <span class="status-pill">{paper_rules.get("daily_max_loss_sol", 0.5)} SOL daily loss</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+apply_theme()
+
 page = st.sidebar.radio(
-    "Page",
+    "Navigation",
     [
         "Overview",
         "Live Messages",
@@ -47,6 +332,7 @@ page = st.sidebar.radio(
         "Settings Preview",
     ],
 )
+render_header(page)
 
 if page == "Overview":
     cols = st.columns(4)
