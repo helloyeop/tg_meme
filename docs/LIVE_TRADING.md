@@ -129,6 +129,23 @@ The signer calls Solana RPC `getBalance` with `confirmed` commitment. A live BUY
 is refused unless the wallet contains the requested amount plus the configured
 `LIVE_FEE_RESERVE_SOL`. The default reserve is `0.05 SOL`.
 
+## Manual Live Swap QA
+
+After balance readiness succeeds, run one explicitly confirmed real-money
+round trip before enabling automated live trading:
+
+```bash
+cd /opt/memetrading
+docker compose exec -T signer \
+  python -m signer.live_swap_qa --confirm-live-swap
+```
+
+This performs a real `0.01 SOL -> USDC -> SOL` round trip. It is never called by
+the pipeline and refuses to run without `--confirm-live-swap`. Network fees,
+priority fees, slippage, and price movement can produce a small loss. If the
+SELL leg fails, USDC can remain in the dedicated wallet and must be reviewed
+before retrying.
+
 ## Operational Record
 
 Decision recorded on `2026-05-30`:
