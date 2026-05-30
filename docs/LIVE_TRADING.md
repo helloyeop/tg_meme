@@ -146,6 +146,24 @@ priority fees, slippage, and price movement can produce a small loss. If the
 SELL leg fails, USDC can remain in the dedicated wallet and must be reviewed
 before retrying.
 
+## Enable And Emergency Stop
+
+After the manual round-trip QA succeeds, enable automated live trading:
+
+```bash
+cd /opt/memetrading
+LIVE_ACTIVATION_CONFIRM=ENABLE_0_5_SOL_LIVE_TRADING \
+  bash scripts/activate_live_trading.sh
+```
+
+This refuses activation unless signer readiness succeeds and the explicit
+confirmation value is provided. To stop new live entries and execution:
+
+```bash
+cd /opt/memetrading
+bash scripts/disable_live_trading.sh
+```
+
 ## Operational Record
 
 Decision recorded on `2026-05-30`:
