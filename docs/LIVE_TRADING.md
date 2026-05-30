@@ -24,7 +24,7 @@ The default environment keeps transaction execution disabled:
 ```dotenv
 LIVE_ORDER_STAGING_ENABLED=false
 LIVE_EXECUTION_ADAPTER=disabled
-LIVE_WALLET_PUBLIC_KEY=4fLfmQfC6zjKxsiPknHtnNt32bRztfZYbkoYL3t5RTzx
+LIVE_WALLET_PUBLIC_KEY=FFDuhHWsDuoUrFAY3Ggk8gty8EeNjArrXLC21UcULvvh
 LIVE_SIGNER_BASE_URL=http://signer:8787
 LIVE_SIGNER_AUTH_TOKEN=
 LIVE_SIGNER_KEYPAIR_PATH=/run/wallet-secrets/live-wallet.json
