@@ -193,6 +193,23 @@ Decision recorded on `2026-05-30`:
 - Never print, log, commit, upload, or paste the private key, recovery phrase,
   or keypair JSON into chat.
 
+Activation record on `2026-05-30`:
+
+- Helius RPC free-tier routing was verified with signer readiness.
+- Jupiter quote-only QA succeeded without transaction submission.
+- A manually approved `0.01 SOL -> USDC -> SOL` round-trip swap succeeded.
+- Automated live trading was enabled with `0.5 SOL` entries, `+10%`
+  take-profit quote protection, `-70%` emergency stop-loss, and `1 SOL` daily
+  realized-loss limit.
+- The signer still enforces a `1 SOL` daily BUY ceiling and `0.05 SOL` fee
+  reserve.
+- Emergency stop command:
+
+  ```bash
+  cd /opt/memetrading
+  bash scripts/disable_live_trading.sh
+  ```
+
 Jupiter Swap V2 `/order` returns an assembled transaction. A signer must sign
 that transaction before `/execute` can submit it. Helius `sendTransaction` also
 requires a fully signed transaction and must be followed by confirmation
