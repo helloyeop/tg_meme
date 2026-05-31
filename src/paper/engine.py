@@ -95,7 +95,7 @@ class PaperTradingEngine:
                 daily_loss_limit_sol=daily_loss_limit,
             )
 
-        entry_size_sol = self.paper.get("entry_size_sol", get_settings().paper_entry_size_sol)
+        entry_size_sol = self._entry_size_sol(event)
         slippage = self.strategy.get("paper", {}).get("estimated_slippage_pct", 5) / 100
         entry_market_cap = market_data.market_cap_usd * (1 + slippage)
         raw_price = market_data.price_usd or 0.0
@@ -311,6 +311,13 @@ class PaperTradingEngine:
                 )
             )
         )
+
+    def _entry_size_sol(self, event: TokenCallEvent) -> float:
+        size = self.paper.get("entry_size_sol", get_settings().paper_entry_size_sol)
+        if (event.actionable_signal_count or 0) > 1:
+            factor = self.strategy.get("actionable_recall", {}).get("entry_size_factor", 0.5)
+            return size * factor
+        return size
 
     def _daily_loss(self, session: Session, now: datetime) -> float:
         kst_day = (now + timedelta(hours=9)).date()

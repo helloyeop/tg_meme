@@ -66,6 +66,35 @@ def test_live_entry_staging_is_separate_from_paper_position() -> None:
     assert session.scalar(select(LiveOrder)).side == "BUY"
 
 
+def test_live_recall_entry_uses_reduced_size() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+        actionable_signal_count=2,
+    )
+    session.add(event)
+    session.flush()
+
+    decision = LiveTradingEngine(live_strategy(), live_settings()).maybe_stage_entry(
+        session,
+        event=event,
+        market_data=TokenMarketData(
+            source="test",
+            token_address="mint",
+            market_cap_usd=100000,
+        ),
+        paper_opened=True,
+    )
+
+    assert decision.staged is True
+    assert decision.position.entry_size_sol == 0.025
+    assert session.scalar(select(LiveOrder)).requested_size_sol == 0.025
+
+
 def test_live_take_profit_stages_single_sell_order_at_ten_percent() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

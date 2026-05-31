@@ -477,12 +477,14 @@ elif page == "Call Events":
             )
             select datetime(e.first_seen_time, '+9 hours') as first_seen_time_kst,
                    datetime(e.first_actionable_call_time, '+9 hours') as first_actionable_call_time_kst,
+                   datetime(e.latest_actionable_call_time, '+9 hours') as latest_actionable_call_time_kst,
                    coalesce(ch.title, e.channel_id) as channel_name,
                    e.token_address, m.symbol as token_symbol, m.name as token_name,
-                   e.current_status, e.call_count,
+                   e.current_status, e.call_count, e.actionable_signal_count,
                    e.bullish_update_count, e.warning_count, e.sold_count,
                    e.first_seen_market_cap_usd,
-                   e.first_actionable_market_cap_usd, e.actionable_context_type,
+                   e.first_actionable_market_cap_usd, e.latest_actionable_market_cap_usd,
+                   e.latest_actionable_context_type,
                    m.market_cap_usd as current_market_cap_usd,
                    case when e.first_seen_market_cap_usd > 0 and m.market_cap_usd is not null
                         then round(m.market_cap_usd / e.first_seen_market_cap_usd, 2) end as market_cap_multiple,

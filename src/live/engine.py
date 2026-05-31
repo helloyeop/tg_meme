@@ -48,13 +48,11 @@ class LiveTradingEngine:
         if self._active_position_count(session) >= self.live.get("max_open_positions", 1):
             return LiveDecision(False, "live_max_open_positions_reached")
 
-        entry_size_sol = self.live.get("entry_size_sol", 0.05)
+        entry_size_sol = self._entry_size_sol(event)
         max_entry_size_sol = self.live.get("max_entry_size_sol", 0.05)
         if entry_size_sol > max_entry_size_sol:
             return LiveDecision(False, "live_entry_size_exceeds_cap")
-        if self._daily_realized_loss_sol(session, now) >= self.live.get(
-            "daily_max_loss_sol", 1
-        ):
+        if self._daily_realized_loss_sol(session, now) >= self.live.get("daily_max_loss_sol", 1):
             return LiveDecision(False, "live_daily_loss_limit_reached")
 
         take_profit_pct = self.live.get("take_profit_pct", 10)
@@ -176,3 +174,10 @@ class LiveTradingEngine:
                 )
             )
         )
+
+    def _entry_size_sol(self, event: TokenCallEvent) -> float:
+        size = self.live.get("entry_size_sol", 0.05)
+        if (event.actionable_signal_count or 0) > 1:
+            factor = self.strategy.get("actionable_recall", {}).get("entry_size_factor", 0.5)
+            return size * factor
+        return size

@@ -78,6 +78,11 @@ def _migrate_market_cap_columns() -> None:
             "actionable_call_message_db_id": "INTEGER",
             "actionable_context_type": "VARCHAR",
             "first_actionable_market_cap_usd": "FLOAT",
+            "latest_actionable_call_time": "DATETIME",
+            "latest_actionable_call_message_db_id": "INTEGER",
+            "latest_actionable_context_type": "VARCHAR",
+            "latest_actionable_market_cap_usd": "FLOAT",
+            "actionable_signal_count": "INTEGER DEFAULT 0",
         },
         "event_scores": {"market_cap_position_score": "FLOAT"},
         "paper_positions": {

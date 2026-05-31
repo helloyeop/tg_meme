@@ -119,8 +119,13 @@ captured at that event's original processing time; a later token snapshot is
 not treated as a channel's first-call value.
 Scoring time decay starts from `first_actionable_call_time` once a `BUY_CALL`
 is actually recognized, so an earlier discussion-only CA mention does not make
-a later actionable call appear stale. The Streamlit `Context Links` page records
-which preceding message was linked, or rejected as ambiguous, for audit.
+a later actionable call appear stale. An explicit same-channel recall after the
+default 60-minute cooldown stays in the same Call Event but adds a
+`token_actionable_signals` anchor. Scoring restarts from that anchor while retaining
+a chase-risk penalty based on the market-cap increase since the first observation.
+Recall-based paper and live entries use half the normal size by default (`0.25 SOL`).
+The Streamlit `Context Links` page records which preceding message was linked, or
+rejected as ambiguous, for audit.
 
 GMGN read-only data uses the local CLI by default:
 

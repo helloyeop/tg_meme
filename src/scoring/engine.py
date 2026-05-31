@@ -5,8 +5,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.settings import get_settings
-from db.models import ChannelPerformance, EventScore, MessageAnalysis, TokenCallEvent
 from data_sources.types import TokenMarketData, TokenSecurityData
+from db.models import ChannelPerformance, EventScore, MessageAnalysis, TokenCallEvent
 
 
 @dataclass
@@ -43,13 +43,26 @@ class ScoringEngine:
             if channel_performance
             else self.scoring.get("new_channel_default_score", 50)
         )
-        call_time = event.first_actionable_call_time or event.first_seen_time
+        call_time = (
+            event.latest_actionable_call_time
+            or event.first_actionable_call_time
+            or event.first_seen_time
+        )
         timing_factor = self._timing_factor((now - call_time).total_seconds() / 60)
         market_cap_factor = self._market_cap_position_factor(event, market_data)
+        chase_risk_factor = self._chase_risk_factor(event)
         ca_factor = self._ca_count_factor(ca_count)
         risk_score, risk_breakdown = self._risk_score(market_data, security_data)
 
-        final = message_score * (channel_score / 50) * timing_factor * market_cap_factor * ca_factor * (risk_score / 100)
+        final = (
+            message_score
+            * (channel_score / 50)
+            * timing_factor
+            * market_cap_factor
+            * chase_risk_factor
+            * ca_factor
+            * (risk_score / 100)
+        )
         final = max(-100, min(100, final))
         return ScoreResult(
             message_score=message_score,
@@ -60,9 +73,21 @@ class ScoringEngine:
             final_signal_score=final,
             breakdown={
                 "intent": analysis.intent,
-                "timing_basis": "first_actionable_call_time" if event.first_actionable_call_time else "first_seen_time",
+                "timing_basis": (
+                    "latest_actionable_call_time"
+                    if event.latest_actionable_call_time
+                    else "first_actionable_call_time"
+                    if event.first_actionable_call_time
+                    else "first_seen_time"
+                ),
                 "timing_factor": timing_factor,
+                "market_cap_anchor": (
+                    "latest_actionable_market_cap_usd"
+                    if event.latest_actionable_market_cap_usd
+                    else "first_seen_market_cap_usd"
+                ),
                 "market_cap_position_factor": market_cap_factor,
+                "chase_risk_factor": chase_risk_factor,
                 "ca_count_factor": ca_factor,
                 "risk": risk_breakdown,
             },
@@ -98,9 +123,13 @@ class ScoringEngine:
             return factors.get("15_to_60_minutes", 0.25)
         return factors.get("over_60_minutes", 0.10)
 
-    def _market_cap_position_factor(self, event: TokenCallEvent, market_data: TokenMarketData | None) -> float:
-        factors = self.scoring.get("market_cap_position_factor", self.scoring.get("price_position_factor", {}))
-        first_market_cap = event.first_seen_market_cap_usd
+    def _market_cap_position_factor(
+        self, event: TokenCallEvent, market_data: TokenMarketData | None
+    ) -> float:
+        factors = self.scoring.get(
+            "market_cap_position_factor", self.scoring.get("price_position_factor", {})
+        )
+        first_market_cap = event.latest_actionable_market_cap_usd or event.first_seen_market_cap_usd
         current_market_cap = market_data.market_cap_usd if market_data else None
         if not first_market_cap or not current_market_cap or current_market_cap <= first_market_cap:
             return factors.get("below_or_equal_first_call", 1.0)
@@ -114,6 +143,23 @@ class ScoringEngine:
         if increase_pct <= 300:
             return factors.get("up_150_to_300_pct", 0.20)
         return factors.get("up_over_300_pct", 0.05)
+
+    def _chase_risk_factor(self, event: TokenCallEvent) -> float:
+        factors = self.strategy.get("actionable_recall", {}).get("chase_risk_factor", {})
+        first_market_cap = event.first_seen_market_cap_usd
+        anchor_market_cap = event.latest_actionable_market_cap_usd
+        if not first_market_cap or not anchor_market_cap or anchor_market_cap <= first_market_cap:
+            return factors.get("below_or_equal_first_call", 1.0)
+        increase_pct = ((anchor_market_cap / first_market_cap) - 1) * 100
+        if increase_pct <= 30:
+            return factors.get("up_0_to_30_pct", 0.95)
+        if increase_pct <= 80:
+            return factors.get("up_30_to_80_pct", 0.85)
+        if increase_pct <= 150:
+            return factors.get("up_80_to_150_pct", 0.85)
+        if increase_pct <= 300:
+            return factors.get("up_150_to_300_pct", 0.70)
+        return factors.get("up_over_300_pct", 0.50)
 
     def _ca_count_factor(self, ca_count: int) -> float:
         factors = self.scoring.get("ca_count_factor", {})

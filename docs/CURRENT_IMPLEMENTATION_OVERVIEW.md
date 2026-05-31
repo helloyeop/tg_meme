@@ -66,19 +66,26 @@ flowchart TD
     D --> I
     B --> I
     I --> U["Merge into same channel/token Call Event"]
-    U --> T{"First actionable BUY_CALL?"}
-    T -- "Yes" --> F["Set first_actionable_call_time<br/>timing score starts here"]
-    T -- "No" --> N["Store update/count only"]
+    U --> T{"Actionable BUY_CALL?"}
+    T -- "First" --> F["Store INITIAL signal<br/>timing score starts here"]
+    T -- "Explicit recall after 60m" --> R["Store RECALL signal<br/>reset timing and market-cap anchor<br/>retain chase-risk penalty"]
+    T -- "No or inside cooldown" --> N["Store update/count only"]
 ```
 
 이 연결은 짧게 분리된 `entry.` + `CA` 메시지를 처리하기 위한 현재 구현이다.
 며칠 동안 이어지는 채널별 토큰 서사 기억은 아직 구현되지 않았다.
 
+같은 채널의 같은 CA는 여전히 하나의 Call Event로 병합된다. 다만 60분 이후의
+명시적 `BUY_CALL`, 또는 재진입 문구가 포함된 bullish 메시지는 이벤트 내부의
+새 `token_actionable_signals` 기준점으로 기록된다. 이후 점수는 최신 기준점부터
+다시 계산하되 최초 관측 대비 상승폭에 따른 chase-risk 계수를 적용한다.
+재콜 기준 신규 paper/live 진입 크기는 기본 진입의 절반인 `0.25 SOL`이다.
+
 ## Paper Trading Lifecycle
 
 ```mermaid
 flowchart LR
-    CALL["BUY_CALL event"] --> CHECK{"Entry checks<br/>score >= 55<br/>risk >= 65<br/>liquidity >= $5k"}
+    CALL["BUY_CALL event"] --> CHECK{"Entry checks<br/>score >= 45<br/>risk >= 60<br/>liquidity >= $1k"}
     CHECK -- "Fail" --> WATCH["No position<br/>event remains observable"]
     CHECK -- "Pass" --> OPEN["Open paper position<br/>default 0.5 SOL<br/>market cap entry"]
     OPEN --> MON["5-second open monitor<br/>DexScreener batch"]

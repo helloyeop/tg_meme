@@ -154,10 +154,14 @@ class TokenCallEvent(TimestampMixin, Base):
     first_actionable_call_time: Mapped[datetime | None] = mapped_column(DateTime)
     actionable_call_message_db_id: Mapped[int | None] = mapped_column(Integer)
     actionable_context_type: Mapped[str | None] = mapped_column(String)
+    latest_actionable_call_time: Mapped[datetime | None] = mapped_column(DateTime)
+    latest_actionable_call_message_db_id: Mapped[int | None] = mapped_column(Integer)
+    latest_actionable_context_type: Mapped[str | None] = mapped_column(String)
     first_seen_price_usd: Mapped[float | None] = mapped_column(Float)
     first_seen_fdv_usd: Mapped[float | None] = mapped_column(Float)
     first_seen_market_cap_usd: Mapped[float | None] = mapped_column(Float)
     first_actionable_market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    latest_actionable_market_cap_usd: Mapped[float | None] = mapped_column(Float)
     first_seen_liquidity_usd: Mapped[float | None] = mapped_column(Float)
     latest_price_usd: Mapped[float | None] = mapped_column(Float)
     latest_fdv_usd: Mapped[float | None] = mapped_column(Float)
@@ -172,6 +176,26 @@ class TokenCallEvent(TimestampMixin, Base):
     sold_count: Mapped[int] = mapped_column(Integer, default=0)
     warning_count: Mapped[int] = mapped_column(Integer, default=0)
     flex_count: Mapped[int] = mapped_column(Integer, default=0)
+    actionable_signal_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TokenActionableSignal(Base):
+    __tablename__ = "token_actionable_signals"
+    __table_args__ = (
+        UniqueConstraint("event_id", "message_db_id"),
+        Index("idx_actionable_signals_event_time", "event_id", "signal_time"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("token_call_events.id"), nullable=False)
+    message_db_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), nullable=False)
+    signal_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    signal_type: Mapped[str] = mapped_column(String, nullable=False)
+    intent: Mapped[str] = mapped_column(String, nullable=False)
+    context_type: Mapped[str | None] = mapped_column(String)
+    market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    chase_increase_pct: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 
 class TokenMarketSnapshot(Base):

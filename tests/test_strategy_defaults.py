@@ -17,3 +17,6 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
     assert strategy["live"]["stop_loss_pct"] == -70
     assert strategy["live"]["daily_max_loss_sol"] == 1
     assert strategy["live"]["daily_max_buy_sol"] == 1
+    assert strategy["actionable_recall"]["min_minutes_since_previous_actionable"] == 60
+    assert strategy["actionable_recall"]["entry_size_factor"] == 0.50
+    assert strategy["actionable_recall"]["chase_risk_factor"]["up_150_to_300_pct"] == 0.70

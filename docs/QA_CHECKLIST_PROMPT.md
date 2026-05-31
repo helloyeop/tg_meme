@@ -18,12 +18,15 @@ Validate only Version 1 behavior:
 - A self-contained CA post never inherits earlier context, and multiple candidate action messages are marked ambiguous without contextual auto-entry.
 - Only Solana contract addresses are extracted.
 - Same channel + same CA is merged into one Call Event, including re-entry/round 2/back in messages.
+- An explicit same-channel recall after the default 60-minute cooldown remains in the same Call Event but creates a new actionable signal anchor.
+- Recall scoring restarts timing and market-cap position from the newest actionable anchor while retaining a chase-risk penalty based on the increase since the first observation.
+- Recall-based paper and live entries use half the normal size by default: 0.25 SOL instead of 0.5 SOL.
 - Data source priority is GMGN -> DexScreener -> Helius.
 - SQLite is used.
 - Paper entry size defaults to 0.5 SOL.
-- Daily max paper loss defaults to 0.5 SOL.
+- Daily max paper loss defaults to 2 SOL.
 - Market cap, rather than unit token price, drives Call Event performance multiples and paper PnL/exit decisions.
-- Once a BUY_CALL exists, time-decay scoring is based on its first actionable call time rather than an earlier non-actionable CA observation.
+- Before any eligible recall, time-decay scoring is based on the first actionable call time rather than an earlier non-actionable CA observation.
 - Open paper positions are rechecked every 5 seconds with DexScreener market-cap data.
 - Closed paper positions are observed after exit on a slower default 15-minute interval for counterfactual low/peak/latest results, reusing a recent existing token snapshot instead of making an extra request.
 - The fast monitor batches no more than 30 Solana token addresses per DexScreener request and keeps an internal request budget below the documented API limit.

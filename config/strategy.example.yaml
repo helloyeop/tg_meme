@@ -26,6 +26,17 @@ entry:
   no_sold_message_in_event: true
   no_existing_open_position_same_channel_token: true
 
+actionable_recall:
+  min_minutes_since_previous_actionable: 60
+  entry_size_factor: 0.50
+  chase_risk_factor:
+    below_or_equal_first_call: 1.00
+    up_0_to_30_pct: 0.95
+    up_30_to_80_pct: 0.85
+    up_80_to_150_pct: 0.85
+    up_150_to_300_pct: 0.70
+    up_over_300_pct: 0.50
+
 exit:
   stop_loss_pct: -50
   take_profit_1_pct: 30

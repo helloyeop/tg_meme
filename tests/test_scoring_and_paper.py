@@ -118,6 +118,75 @@ def test_scoring_uses_first_actionable_call_time_for_late_buy_signal() -> None:
     assert score.breakdown["timing_basis"] == "first_actionable_call_time"
 
 
+def test_scoring_restarts_from_latest_recall_with_chase_risk_penalty() -> None:
+    now = datetime.utcnow()
+    event = TokenCallEvent(
+        channel_id="c",
+        token_address="t",
+        first_seen_time=now - timedelta(hours=4),
+        first_seen_market_cap_usd=100000,
+        first_actionable_call_time=now - timedelta(hours=4),
+        latest_actionable_call_time=now,
+        latest_actionable_market_cap_usd=300000,
+    )
+    analysis = MessageAnalysis(message_db_id=1, intent="BUY_CALL")
+    market = TokenMarketData(
+        source="test", token_address="t", market_cap_usd=300000, liquidity_usd=10000
+    )
+
+    score = ScoringEngine().score(
+        event=event,
+        analysis=analysis,
+        market_data=market,
+        security_data=TokenSecurityData(source="test", token_address="t", holder_count=100),
+        now=now,
+    )
+
+    assert score.timing_score == 100
+    assert score.market_cap_position_score == 100
+    assert score.breakdown["timing_basis"] == "latest_actionable_call_time"
+    assert score.breakdown["market_cap_anchor"] == "latest_actionable_market_cap_usd"
+    assert score.breakdown["chase_risk_factor"] == 0.7
+    assert score.final_signal_score == 49
+
+
+def test_paper_recall_entry_uses_reduced_size() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    now = datetime.utcnow()
+    event = TokenCallEvent(
+        channel_id="c",
+        token_address="t",
+        first_seen_time=now - timedelta(hours=2),
+        first_seen_market_cap_usd=100000,
+        latest_actionable_call_time=now,
+        latest_actionable_market_cap_usd=300000,
+        actionable_signal_count=2,
+        warning_count=0,
+        sold_count=0,
+    )
+    session.add(event)
+    session.flush()
+    market = TokenMarketData(
+        source="test", token_address="t", market_cap_usd=300000, liquidity_usd=10000
+    )
+    score = ScoringEngine().score(
+        event=event,
+        analysis=MessageAnalysis(message_db_id=1, intent="BUY_CALL"),
+        market_data=market,
+        security_data=TokenSecurityData(source="test", token_address="t", holder_count=100),
+        now=now,
+    )
+
+    decision = PaperTradingEngine().maybe_open_position(
+        session, event=event, score=score, market_data=market, now=now
+    )
+
+    assert decision.opened
+    assert decision.position.entry_size_sol == 0.25
+
+
 def test_paper_pnl_uses_market_cap_movement_instead_of_price() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
