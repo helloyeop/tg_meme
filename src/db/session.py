@@ -132,3 +132,17 @@ def _migrate_market_cap_columns() -> None:
                 """
             )
         )
+        connection.execute(
+            text(
+                """
+                UPDATE token_call_events
+                SET latest_actionable_call_time = first_actionable_call_time,
+                    latest_actionable_call_message_db_id = actionable_call_message_db_id,
+                    latest_actionable_context_type = actionable_context_type,
+                    latest_actionable_market_cap_usd = first_actionable_market_cap_usd,
+                    actionable_signal_count = 1
+                WHERE first_actionable_call_time IS NOT NULL
+                  AND latest_actionable_call_time IS NULL
+                """
+            )
+        )
