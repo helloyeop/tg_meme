@@ -674,15 +674,18 @@ elif page == "Live Trading":
             select p.id, coalesce(ch.title, p.channel_id) as channel_name,
                    p.token_address, lm.symbol as token_symbol, lm.name as token_name,
                    p.status, datetime(p.entry_time, '+9 hours') as entry_time_kst,
-                   datetime(p.exit_time, '+9 hours') as exit_time_kst,
+                   datetime(p.exit_confirmed_time, '+9 hours') as exit_time_kst,
                    p.entry_market_cap_usd, p.entry_size_sol, p.target_profit_pct,
                    p.highest_market_cap_usd, lm.market_cap_usd as current_market_cap_usd,
-                   p.realized_pnl_sol, p.exit_reason
+                   p.realized_pnl_sol,
+                   (select o.reason from live_orders o
+                    where o.position_id=p.id and o.side='SELL'
+                    order by o.requested_at desc, o.id desc limit 1) as exit_reason
             from live_positions p
             left join telegram_channels ch on ch.channel_id=p.channel_id
             left join latest_market lm on lm.token_address=p.token_address and lm.row_num=1
             where p.status='CLOSED'
-            order by p.exit_time desc, p.id desc
+            order by p.exit_confirmed_time desc, p.id desc
             limit 500
             """
         )
