@@ -91,7 +91,7 @@ class SignerRuntime:
         else:
             raise HTTPException(400, "Only BUY and SELL quotes are supported.")
         return self._quote_response(
-            self._get_order(input_mint, output_mint, request.amount),
+            self._get_quote(input_mint, output_mint, request.amount),
             side=side,
         )
 
@@ -235,6 +235,31 @@ class SignerRuntime:
             raise HTTPException(502, "Jupiter returned an order without an output amount.")
         if min_output_amount is not None and int(order["outAmount"]) < min_output_amount:
             raise HTTPException(409, "Jupiter output quote is below the requested minimum.")
+        return order
+
+    def _get_quote(self, input_mint: str, output_mint: str, amount: int) -> dict:
+        headers = {"x-api-key": self.settings.jupiter_api_key or ""}
+        params = {
+            "inputMint": input_mint,
+            "outputMint": output_mint,
+            "amount": str(amount),
+        }
+        with httpx.Client(timeout=15) as client:
+            response = client.get(
+                f"{self.settings.jupiter_swap_base_url.rstrip('/')}/order",
+                params=params,
+                headers=headers,
+            )
+            response.raise_for_status()
+            order = response.json()
+        if (
+            order.get("inputMint") != input_mint
+            or order.get("outputMint") != output_mint
+            or order.get("inAmount") != str(amount)
+        ):
+            raise HTTPException(502, "Jupiter returned an invalid quote.")
+        if order.get("outAmount") is None:
+            raise HTTPException(502, "Jupiter returned a quote without an output amount.")
         return order
 
     @staticmethod

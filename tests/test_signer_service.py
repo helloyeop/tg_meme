@@ -127,7 +127,7 @@ def test_signer_round_trip_quote_reports_executable_recovery(tmp_path: Path) -> 
             },
         ]
     )
-    runtime._get_order = lambda *_: next(orders)
+    runtime._get_quote = lambda *_: next(orders)
 
     quote = runtime.quote_buy_round_trip(
         QuoteRequest(
@@ -140,3 +140,23 @@ def test_signer_round_trip_quote_reports_executable_recovery(tmp_path: Path) -> 
     assert quote["recovery_pct"] == 90
     assert quote["buy"]["out_amount"] == "1000"
     assert quote["sell"]["out_amount"] == "450000000"
+
+
+def test_signer_quote_does_not_require_executable_order_fields(tmp_path: Path) -> None:
+    runtime = runtime_with_ledger(tmp_path / "signer.db")
+    runtime._get_quote = lambda *_: {
+        "inputMint": "sol",
+        "outputMint": "token",
+        "inAmount": "500000000",
+        "outAmount": "1000",
+    }
+
+    quote = runtime.quote(
+        QuoteRequest(
+            side="BUY",
+            token_address="So11111111111111111111111111111111111111112",
+            amount=500_000_000,
+        )
+    )
+
+    assert quote["out_amount"] == "1000"
