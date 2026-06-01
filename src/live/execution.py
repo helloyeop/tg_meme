@@ -163,6 +163,9 @@ class LiveOrderExecutor:
             order.transaction_signature = payload.get("signature")
             if payload.get("status") != "Success":
                 order.status = "FAILED"
+                if order.side == "SELL":
+                    position.status = "OPEN"
+                    position.exit_requested_time = None
                 continue
 
             order.status = "CONFIRMED"
@@ -197,19 +200,15 @@ class LiveOrderExecutor:
             return None
         if not position.entry_input_lamports:
             return None
-        return int(
-            int(position.entry_input_lamports) * (1 + position.target_profit_pct / 100)
-        )
+        return int(int(position.entry_input_lamports) * (1 + position.target_profit_pct / 100))
 
     def _realized_pnl_sol(self, position: LivePosition) -> float:
         if position.entry_wallet_delta_lamports and position.exit_wallet_delta_lamports:
             return (
-                int(position.entry_wallet_delta_lamports)
-                + int(position.exit_wallet_delta_lamports)
+                int(position.entry_wallet_delta_lamports) + int(position.exit_wallet_delta_lamports)
             ) / LAMPORTS_PER_SOL
         return (
-            int(position.exit_output_lamports or 0)
-            - int(position.entry_input_lamports or 0)
+            int(position.exit_output_lamports or 0) - int(position.entry_input_lamports or 0)
         ) / LAMPORTS_PER_SOL
 
     def _send_alert(self, order: LiveOrder, position: LivePosition) -> None:

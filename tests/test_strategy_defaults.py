@@ -14,6 +14,7 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
     assert strategy["exit"]["stop_loss_pct"] == -50
     assert strategy["live"]["entry_size_sol"] == 0.5
     assert strategy["live"]["take_profit_pct"] == 10
+    assert strategy["live"]["take_profit_retry_seconds"] == 30
     assert strategy["live"]["stop_loss_pct"] == -70
     assert strategy["live"]["daily_max_loss_sol"] == 1
     assert strategy["live"]["daily_max_buy_sol"] == 1

@@ -157,6 +157,11 @@ position's configured profit target. Emergency stop-loss exits intentionally do
 not apply this minimum. Live realized PnL uses actual wallet lamport changes
 when available, including network fees and token-account rent.
 
+If a take-profit SELL is refused because the quote is below the minimum output,
+the order remains recorded as `FAILED` and the position returns to `OPEN`.
+The pipeline keeps monitoring the position and may stage a new SELL after the
+configured retry cooldown, which defaults to 30 seconds.
+
 ## Enable And Emergency Stop
 
 After the manual round-trip QA succeeds, enable automated live trading:

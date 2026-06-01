@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -109,6 +109,8 @@ class LiveTradingEngine:
         if self._has_pending_exit(session, position.id):
             return LiveDecision(False, "live_exit_already_staged", position=position)
         if current_market_cap_usd >= position.target_market_cap_usd:
+            if self._has_recent_failed_take_profit(session, position.id, now):
+                return LiveDecision(False, "live_take_profit_retry_cooldown", position=position)
             reason = "take_profit_10_pct"
         elif current_market_cap_usd <= position.stop_loss_market_cap_usd:
             reason = "emergency_stop_loss_70_pct"
@@ -171,6 +173,23 @@ class LiveTradingEngine:
                     LiveOrder.position_id == position_id,
                     LiveOrder.side == "SELL",
                     LiveOrder.status.in_(["STAGED", "SIGNED", "SUBMITTED"]),
+                )
+            )
+        )
+
+    def _has_recent_failed_take_profit(
+        self, session: Session, position_id: int, now: datetime
+    ) -> bool:
+        retry_seconds = self.live.get("take_profit_retry_seconds", 30)
+        cutoff = now - timedelta(seconds=retry_seconds)
+        return bool(
+            session.scalar(
+                select(LiveOrder.id).where(
+                    LiveOrder.position_id == position_id,
+                    LiveOrder.side == "SELL",
+                    LiveOrder.reason.startswith("take_profit"),
+                    LiveOrder.status == "FAILED",
+                    LiveOrder.requested_at >= cutoff,
                 )
             )
         )

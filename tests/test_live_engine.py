@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -252,3 +252,111 @@ def test_live_take_profit_sell_requires_ten_percent_jupiter_output() -> None:
     minimum = LiveOrderExecutor(live_settings())._min_output_amount(order, position)
 
     assert minimum == 550000000
+
+
+def test_failed_take_profit_sell_reopens_position_for_monitoring() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    position = LivePosition(
+        event_id=event.id,
+        channel_id="channel",
+        token_address="mint",
+        status="EXIT_REQUESTED",
+        entry_time=datetime.utcnow(),
+        entry_market_cap_usd=100000,
+        entry_size_sol=0.5,
+        target_profit_pct=10,
+        target_market_cap_usd=110000,
+        highest_market_cap_usd=110000,
+        token_amount_raw="123",
+        entry_input_lamports="500000000",
+        exit_requested_time=datetime.utcnow(),
+    )
+    session.add(position)
+    session.flush()
+    order = LiveOrder(
+        event_id=event.id,
+        position_id=position.id,
+        channel_id="channel",
+        token_address="mint",
+        side="SELL",
+        status="STAGED",
+        reason="take_profit_10_pct",
+        requested_at=datetime.utcnow(),
+    )
+    session.add(order)
+    session.flush()
+    signer = SimpleNamespace(
+        execute=lambda **_: {
+            "status": "FAILED",
+            "error": "Jupiter output quote is below the requested minimum.",
+        }
+    )
+
+    count = LiveOrderExecutor(
+        live_settings(live_execution_adapter="signer_service"), signer
+    ).execute_staged_orders(session)
+
+    assert count == 0
+    assert order.status == "FAILED"
+    assert position.status == "OPEN"
+    assert position.exit_requested_time is None
+
+
+def test_recent_failed_take_profit_sell_applies_retry_cooldown() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    now = datetime.utcnow()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=now,
+    )
+    session.add(event)
+    session.flush()
+    position = LivePosition(
+        event_id=event.id,
+        channel_id="channel",
+        token_address="mint",
+        status="OPEN",
+        entry_time=now,
+        entry_market_cap_usd=100000,
+        entry_size_sol=0.5,
+        target_profit_pct=10,
+        target_market_cap_usd=110000,
+        highest_market_cap_usd=110000,
+    )
+    session.add(position)
+    session.flush()
+    session.add(
+        LiveOrder(
+            event_id=event.id,
+            position_id=position.id,
+            channel_id="channel",
+            token_address="mint",
+            side="SELL",
+            status="FAILED",
+            reason="take_profit_10_pct",
+            requested_at=now - timedelta(seconds=10),
+        )
+    )
+    session.flush()
+
+    decision = LiveTradingEngine(live_strategy(), live_settings()).evaluate_exit(
+        session,
+        position=position,
+        current_market_cap_usd=110000,
+        now=now,
+    )
+
+    assert decision.staged is False
+    assert decision.reason == "live_take_profit_retry_cooldown"
