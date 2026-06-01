@@ -658,7 +658,32 @@ elif page == "Live Trading":
             from live_positions p
             left join telegram_channels ch on ch.channel_id=p.channel_id
             left join latest_market lm on lm.token_address=p.token_address and lm.row_num=1
+            where p.status in ('ENTRY_REQUESTED','OPEN','EXIT_REQUESTED')
             order by p.entry_time desc
+            """
+        )
+    )
+    st.subheader("Closed Live Positions")
+    render_dataframe(
+        query(
+            """
+            with latest_market as (
+              select *, row_number() over (partition by token_address order by snapshot_time desc, id desc) as row_num
+              from token_market_snapshots
+            )
+            select p.id, coalesce(ch.title, p.channel_id) as channel_name,
+                   p.token_address, lm.symbol as token_symbol, lm.name as token_name,
+                   p.status, datetime(p.entry_time, '+9 hours') as entry_time_kst,
+                   datetime(p.exit_time, '+9 hours') as exit_time_kst,
+                   p.entry_market_cap_usd, p.entry_size_sol, p.target_profit_pct,
+                   p.highest_market_cap_usd, lm.market_cap_usd as current_market_cap_usd,
+                   p.realized_pnl_sol, p.exit_reason
+            from live_positions p
+            left join telegram_channels ch on ch.channel_id=p.channel_id
+            left join latest_market lm on lm.token_address=p.token_address and lm.row_num=1
+            where p.status='CLOSED'
+            order by p.exit_time desc, p.id desc
+            limit 500
             """
         )
     )
