@@ -153,6 +153,16 @@ class LiveOrderExecutor:
                     amount=amount,
                     min_output_amount=self._min_output_amount(order, position),
                 )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 409 and order.side == "SELL":
+                    order.status = "FAILED"
+                    order.raw_json = json.dumps({"error": str(exc)})
+                    position.status = "OPEN"
+                    position.exit_requested_time = None
+                else:
+                    order.status = "STAGED"
+                    order.raw_json = json.dumps({"error": str(exc)})
+                continue
             except Exception as exc:
                 order.status = "STAGED"
                 order.raw_json = json.dumps({"error": str(exc)})

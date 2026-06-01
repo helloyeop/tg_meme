@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -360,3 +361,60 @@ def test_recent_failed_take_profit_sell_applies_retry_cooldown() -> None:
 
     assert decision.staged is False
     assert decision.reason == "live_take_profit_retry_cooldown"
+
+
+def test_http_409_take_profit_refusal_reopens_position() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    position = LivePosition(
+        event_id=event.id,
+        channel_id="channel",
+        token_address="mint",
+        status="EXIT_REQUESTED",
+        entry_time=datetime.utcnow(),
+        entry_market_cap_usd=100000,
+        entry_size_sol=0.5,
+        target_profit_pct=10,
+        target_market_cap_usd=110000,
+        highest_market_cap_usd=110000,
+        token_amount_raw="123",
+        entry_input_lamports="500000000",
+        exit_requested_time=datetime.utcnow(),
+    )
+    session.add(position)
+    session.flush()
+    order = LiveOrder(
+        event_id=event.id,
+        position_id=position.id,
+        channel_id="channel",
+        token_address="mint",
+        side="SELL",
+        status="STAGED",
+        reason="take_profit_10_pct",
+        requested_at=datetime.utcnow(),
+    )
+    session.add(order)
+    session.flush()
+    response = httpx.Response(409, request=httpx.Request("POST", "http://signer/swap"))
+    signer = SimpleNamespace(
+        execute=lambda **_: (_ for _ in ()).throw(
+            httpx.HTTPStatusError("quote refused", request=response.request, response=response)
+        )
+    )
+
+    count = LiveOrderExecutor(
+        live_settings(live_execution_adapter="signer_service"), signer
+    ).execute_staged_orders(session)
+
+    assert count == 0
+    assert order.status == "FAILED"
+    assert position.status == "OPEN"
+    assert position.exit_requested_time is None
