@@ -51,7 +51,7 @@ PAGE_META = {
     ),
     "Live Trading": (
         "Live trading",
-        "Isolated live ledger with +10% take-profit and -70% emergency stop-loss.",
+        "Isolated live ledger with market-cap-tiered take-profit and -70% emergency stop-loss.",
     ),
     "Closed Trades": (
         "Closed trades",

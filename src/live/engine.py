@@ -55,7 +55,7 @@ class LiveTradingEngine:
         if self._daily_realized_loss_sol(session, now) >= self.live.get("daily_max_loss_sol", 1):
             return LiveDecision(False, "live_daily_loss_limit_reached")
 
-        take_profit_pct = self.live.get("take_profit_pct", 10)
+        take_profit_pct = self._take_profit_pct(market_data.market_cap_usd)
         stop_loss_pct = self.live.get("stop_loss_pct", -70)
         target_market_cap = market_data.market_cap_usd * (1 + take_profit_pct / 100)
         stop_loss_market_cap = market_data.market_cap_usd * (1 + stop_loss_pct / 100)
@@ -111,7 +111,7 @@ class LiveTradingEngine:
         if current_market_cap_usd >= position.target_market_cap_usd:
             if self._has_recent_failed_take_profit(session, position.id, now):
                 return LiveDecision(False, "live_take_profit_retry_cooldown", position=position)
-            reason = "take_profit_10_pct"
+            reason = f"take_profit_{position.target_profit_pct:g}_pct"
         elif current_market_cap_usd <= position.stop_loss_market_cap_usd:
             reason = "emergency_stop_loss_70_pct"
         else:
@@ -200,3 +200,12 @@ class LiveTradingEngine:
             factor = self.strategy.get("actionable_recall", {}).get("entry_size_factor", 0.5)
             return size * factor
         return size
+
+    def _take_profit_pct(self, entry_market_cap_usd: float) -> float:
+        default = self.live.get("take_profit_pct", 10)
+        tiers = self.live.get("take_profit_by_entry_market_cap", {})
+        if entry_market_cap_usd < 500_000:
+            return tiers.get("below_500k_pct", default)
+        if entry_market_cap_usd < 1_000_000:
+            return tiers.get("from_500k_to_below_1m_pct", default)
+        return tiers.get("at_or_above_1m_pct", default)

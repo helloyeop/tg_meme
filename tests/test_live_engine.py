@@ -29,6 +29,11 @@ def live_strategy():
         "live": {
             "entry_size_sol": 0.05,
             "take_profit_pct": 10,
+            "take_profit_by_entry_market_cap": {
+                "below_500k_pct": 30,
+                "from_500k_to_below_1m_pct": 20,
+                "at_or_above_1m_pct": 10,
+            },
             "stop_loss_pct": -70,
             "daily_max_loss_sol": 1,
             "max_open_positions": 1,
@@ -63,8 +68,27 @@ def test_live_entry_staging_is_separate_from_paper_position() -> None:
     assert decision.staged is True
     assert decision.position is not None
     assert decision.position.status == "ENTRY_REQUESTED"
-    assert decision.position.target_market_cap_usd == pytest.approx(110000)
+    assert decision.position.target_profit_pct == 30
+    assert decision.position.target_market_cap_usd == pytest.approx(130000)
     assert session.scalar(select(LiveOrder)).side == "BUY"
+
+
+@pytest.mark.parametrize(
+    ("entry_market_cap_usd", "expected_take_profit_pct"),
+    [
+        (499_999, 30),
+        (500_000, 20),
+        (999_999, 20),
+        (1_000_000, 10),
+    ],
+)
+def test_live_take_profit_pct_uses_entry_market_cap_tiers(
+    entry_market_cap_usd: float,
+    expected_take_profit_pct: float,
+) -> None:
+    live = LiveTradingEngine(live_strategy(), live_settings())
+
+    assert live._take_profit_pct(entry_market_cap_usd) == expected_take_profit_pct
 
 
 def test_live_recall_entry_uses_reduced_size() -> None:
@@ -135,6 +159,42 @@ def test_live_take_profit_stages_single_sell_order_at_ten_percent() -> None:
     assert len(orders) == 1
     assert orders[0].side == "SELL"
     assert orders[0].reason == "take_profit_10_pct"
+
+
+def test_live_take_profit_reason_matches_position_target() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    position = LivePosition(
+        event_id=event.id,
+        channel_id="channel",
+        token_address="mint",
+        status="OPEN",
+        entry_time=datetime.utcnow(),
+        entry_market_cap_usd=100000,
+        entry_size_sol=0.05,
+        target_profit_pct=30,
+        target_market_cap_usd=130000,
+        highest_market_cap_usd=100000,
+    )
+    session.add(position)
+    session.flush()
+
+    decision = LiveTradingEngine(live_strategy(), live_settings()).evaluate_exit(
+        session,
+        position=position,
+        current_market_cap_usd=130000,
+    )
+
+    assert decision.staged is True
+    assert session.scalar(select(LiveOrder)).reason == "take_profit_30_pct"
 
 
 def test_live_emergency_stop_loss_stages_sell_order() -> None:

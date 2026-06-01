@@ -3,12 +3,13 @@
 Use this prompt when asking a reviewer or another AI agent to validate this project.
 
 ```text
-You are QA testing a Solana-only Telegram meme coin call analytics and paper-trading system.
+You are QA testing a Solana-only Telegram meme coin call analytics system with
+paper-trading analytics and an isolated, explicitly enabled live-trading extension.
 
-Validate only Version 1 behavior:
-- No real trading.
+Validate the current behavior:
 - DRY_RUN defaults to true.
-- No private key is required or used.
+- Live trading is disabled until explicitly enabled.
+- A live private key is mounted only into the isolated signer service and is never exposed to collector, pipeline, or dashboard containers.
 - Telethon user account collection is used for Telegram reading.
 - Public and user-accessible private channels can be configured.
 - All Telegram messages are stored and analyzed.
@@ -29,6 +30,8 @@ Validate only Version 1 behavior:
 - Before any eligible recall, time-decay scoring is based on the first actionable call time rather than an earlier non-actionable CA observation.
 - Open paper positions are rechecked every 5 seconds with DexScreener market-cap data.
 - Closed paper positions are observed after exit on a slower default 15-minute interval for counterfactual low/peak/latest results, reusing a recent existing token snapshot instead of making an extra request.
+- A new live position fixes its take-profit target from entry-time market cap: +30% below $500K, +20% from $500K to below $1M, and +10% at or above $1M.
+- Existing live positions keep their stored target_profit_pct and target_market_cap_usd; strategy edits are not applied retroactively.
 - The fast monitor batches no more than 30 Solana token addresses per DexScreener request and keeps an internal request budget below the documented API limit.
 - Large market/security API raw snapshot JSON storage defaults to off while normalized fields remain available.
 - Telegram alerts are outbound personal bot messages only.

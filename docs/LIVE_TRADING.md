@@ -7,8 +7,9 @@ tables and a separate engine so experiments do not change paper-trading history.
 
 - A paper entry decision may stage a live `BUY` intent when explicitly enabled.
 - The live entry size is `0.5 SOL`.
-- An `OPEN` live position stages one `SELL` intent at `+10%` profit or `-70%`
-  emergency stop-loss.
+- An `OPEN` live position stages one `SELL` intent using the target fixed at
+  entry time: `+30%` below `$500K`, `+20%` from `$500K` to below `$1M`, or
+  `+10%` at or above `$1M`. The emergency stop-loss remains `-70%`.
 - The app refuses new entries after `1 SOL` of realized live losses in a day.
 - The isolated signer applies an additional `1 SOL` daily BUY spend ceiling.
 
@@ -203,9 +204,11 @@ Activation record on `2026-05-30`:
 - Helius RPC free-tier routing was verified with signer readiness.
 - Jupiter quote-only QA succeeded without transaction submission.
 - A manually approved `0.01 SOL -> USDC -> SOL` round-trip swap succeeded.
-- Automated live trading was enabled with `0.5 SOL` entries, `+10%`
-  take-profit quote protection, `-70%` emergency stop-loss, and `1 SOL` daily
-  realized-loss limit.
+- Automated live trading was enabled with `0.5 SOL` entries, take-profit quote
+  protection, `-70%` emergency stop-loss, and `1 SOL` daily realized-loss
+  limit. On `2026-06-01`, take-profit targets were changed for new positions to
+  `+30%` below `$500K`, `+20%` from `$500K` to below `$1M`, and `+10%` at or
+  above `$1M`.
 - The signer still enforces a `1 SOL` daily BUY ceiling and `0.05 SOL` fee
   reserve.
 - Emergency stop command:

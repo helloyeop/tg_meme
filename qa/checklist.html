@@ -43,8 +43,8 @@
 </main>
 <script>
 const items = [
-  ["Safety", "DRY_RUN 기본값이 true이며 Settings.real_trading_enabled가 항상 false이다."],
-  ["Safety", ".env.example에 실제 private key 입력 항목이 없고 v1 코드가 private key를 요구하지 않는다."],
+  ["Safety", "DRY_RUN 기본값은 true이며 실매매는 명시적 활성화 전에는 비활성화된다."],
+  ["Safety", "실매매 private key는 VPS의 wallet-secrets/live-wallet.json에만 존재하며 collector, pipeline, dashboard 컨테이너에는 마운트되지 않는다."],
   ["Database", "python -m app.main --mode init-db 실행 시 SQLite 테이블이 생성된다."],
   ["Database", "telegram_messages, extracted_addresses, message_analysis, token_call_events, paper_positions 테이블이 존재한다."],
   ["Telegram", "Telethon 사용자 계정 설정(TELEGRAM_API_ID/API_HASH/SESSION_NAME)으로 collector가 시작된다."],
@@ -71,6 +71,8 @@ const items = [
   ["Paper Trading", "진입/손익/stop loss/take profit은 market_cap_usd 변화율 기준이며 fill에도 market cap이 기록된다."],
   ["Paper Trading", "OPEN/PARTIALLY_CLOSED 포지션은 기본 5초마다 DexScreener market cap을 다시 확인하여 급락 손절을 평가한다."],
   ["Paper Trading", "CLOSED 포지션은 기본 15분 간격의 사후 관찰 대상으로 남으며, 같은 토큰의 최근 스냅샷이 있으면 추가 API 요청 없이 이를 재사용한다."],
+  ["Live Trading", "신규 실매매 포지션의 수익실현 목표는 진입 당시 market cap 기준으로 고정된다: 500K 미만 +30%, 500K 이상 1M 미만 +20%, 1M 이상 +10%."],
+  ["Live Trading", "실매매 목표 수익률은 기존 열린 포지션에 소급 적용되지 않으며, 저장된 target_profit_pct와 target_market_cap_usd를 따른다."],
   ["API Limits", "빠른 포지션 감시는 DexScreener 공식 다중 토큰 endpoint를 사용하며 요청당 최대 30개, 앱 요청 예산 분당 240회로 제한된다."],
   ["Storage", "시장/보안 스냅샷은 정규화 컬럼을 저장하고 대용량 raw_json 저장은 기본 비활성화된다."],
   ["Alerts", "텔레그램 개인 봇 알림은 토큰/채팅 ID가 설정된 경우에만 outbound sendMessage를 호출한다."],
