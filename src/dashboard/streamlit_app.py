@@ -6,6 +6,7 @@ import yaml
 from sqlalchemy import text
 
 from app.settings import get_settings
+from dashboard.formatting import format_dashboard_frame, format_percent, format_sol
 from db.session import create_db_engine
 
 st.set_page_config(page_title="Memecoin Telegram Call Bot", layout="wide")
@@ -295,10 +296,16 @@ def query(sql: str, params: dict | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def render_dataframe(frame: pd.DataFrame) -> None:
+    st.dataframe(format_dashboard_frame(frame), width="stretch")
+
+
 def render_header(current_page: str) -> None:
     page_title, description = PAGE_META[current_page]
     dry_run_class = "good" if settings.dry_run else "warn"
     dry_run_label = "DRY RUN" if settings.dry_run else "LIVE BLOCKED"
+    entry_size_sol = format_sol(paper_rules.get("entry_size_sol", 0.5))
+    daily_max_loss_sol = format_sol(paper_rules.get("daily_max_loss_sol", 0.5))
     st.markdown(
         f"""
         <div class="app-header">
@@ -310,8 +317,8 @@ def render_header(current_page: str) -> None:
             <div class="status-row" aria-label="Runtime status">
                 <span class="status-pill {dry_run_class}">{dry_run_label}</span>
                 <span class="status-pill">{settings.llm_provider} / {settings.llm_model}</span>
-                <span class="status-pill">{paper_rules.get("entry_size_sol", 0.5)} SOL entries</span>
-                <span class="status-pill">{paper_rules.get("daily_max_loss_sol", 0.5)} SOL daily loss</span>
+                <span class="status-pill">{entry_size_sol} SOL entries</span>
+                <span class="status-pill">{daily_max_loss_sol} SOL daily loss</span>
                 <span class="status-pill {'warn' if settings.real_trading_enabled else ''}">Live adapter: {settings.live_execution_adapter}</span>
             </div>
         </div>
@@ -387,7 +394,7 @@ if page == "Overview":
         df = query(sql)
         col.metric(label, int(df.iloc[0]["value"]) if not df.empty else 0)
     st.subheader("Recent Errors")
-    st.dataframe(
+    render_dataframe(
         query(
             """
             select datetime(created_at, '+9 hours') as created_at_kst,
@@ -395,12 +402,11 @@ if page == "Overview":
             from app_errors
             order by created_at desc limit 20
             """
-        ),
-        width="stretch",
+        )
     )
 
 elif page == "Live Messages":
-    st.dataframe(
+    render_dataframe(
         query(
             """
             with latest_market as (
@@ -425,12 +431,11 @@ elif page == "Live Messages":
             order by m.message_time desc
             limit 300
             """
-        ),
-        width="stretch",
+        )
     )
 
 elif page == "Context Links":
-    st.dataframe(
+    render_dataframe(
         query(
             """
             with latest_market as (
@@ -453,12 +458,11 @@ elif page == "Context Links":
             order by links.created_at desc, links.id desc
             limit 300
             """
-        ),
-        width="stretch",
+        )
     )
 
 elif page == "Call Events":
-    st.dataframe(
+    render_dataframe(
         query(
             """
             with latest_scores as (
@@ -509,8 +513,7 @@ elif page == "Call Events":
             limit 300
             """,
             {"signal_min": signal_min, "risk_min": risk_min, "liquidity_min": liquidity_min},
-        ),
-        width="stretch",
+        )
     )
 
 elif page == "Entry Decisions":
@@ -535,10 +538,10 @@ elif page == "Entry Decisions":
     for col, (label, sql) in zip(cols, decision_metrics.items(), strict=False):
         df = query(sql)
         value = df.iloc[0]["value"] if not df.empty else 0
-        col.metric(label, f"{value:.2f}" if "SOL" in label else int(value or 0))
+        col.metric(label, format_sol(value) if "SOL" in label else int(value or 0))
 
     st.subheader("Blocked Reason Summary")
-    st.dataframe(
+    render_dataframe(
         query(
             f"""
             select reason, count(*) as count
@@ -547,11 +550,10 @@ elif page == "Entry Decisions":
             group by reason
             order by count desc
             """
-        ),
-        width="stretch",
+        )
     )
     st.subheader("Recent Entry Decisions")
-    st.dataframe(
+    render_dataframe(
         query(
             """
             select datetime(d.decision_time, '+9 hours') as decision_time_kst,
@@ -577,12 +579,11 @@ elif page == "Entry Decisions":
             order by d.decision_time desc, d.id desc
             limit 500
             """
-        ),
-        width="stretch",
+        )
     )
 
 elif page == "Paper Portfolio":
-    st.dataframe(
+    render_dataframe(
         query(
             """
             with latest_market as (
@@ -605,8 +606,7 @@ elif page == "Paper Portfolio":
             where p.status in ('OPEN','PARTIALLY_CLOSED')
             order by p.entry_time desc
             """
-        ),
-        width="stretch",
+        )
     )
 
 elif page == "Live Trading":
@@ -637,7 +637,7 @@ elif page == "Live Trading":
         )
 
     st.subheader("Live Positions")
-    st.dataframe(
+    render_dataframe(
         query(
             """
             with latest_market as (
@@ -660,11 +660,10 @@ elif page == "Live Trading":
             left join latest_market lm on lm.token_address=p.token_address and lm.row_num=1
             order by p.entry_time desc
             """
-        ),
-        width="stretch",
+        )
     )
     st.subheader("Live Orders")
-    st.dataframe(
+    render_dataframe(
         query(
             """
             with latest_market as (
@@ -683,8 +682,7 @@ elif page == "Live Trading":
             order by o.requested_at desc, o.id desc
             limit 500
             """
-        ),
-        width="stretch",
+        )
     )
 
 elif page == "Closed Trades":
@@ -743,37 +741,29 @@ elif page == "Closed Trades":
         )
         selected_trade = closed_trades.loc[closed_trades["id"] == selected_trade_id].iloc[0]
         cols = st.columns(4)
-        cols[0].metric("Realized PnL (SOL)", f"{selected_trade['realized_pnl_sol']:.4f}")
+        cols[0].metric("Realized PnL (SOL)", format_sol(selected_trade["realized_pnl_sol"]))
         cols[1].metric(
             "Hold-Through Worst",
-            "-"
-            if pd.isna(selected_trade["hold_through_worst_return_pct"])
-            else f"{selected_trade['hold_through_worst_return_pct']:.2f}%",
+            format_percent(selected_trade["hold_through_worst_return_pct"]),
         )
         cols[2].metric(
             "Hold-Through Peak",
-            "-"
-            if pd.isna(selected_trade["hold_through_peak_return_pct"])
-            else f"{selected_trade['hold_through_peak_return_pct']:.2f}%",
+            format_percent(selected_trade["hold_through_peak_return_pct"]),
         )
         cols[3].metric(
             "Peak PnL (SOL)",
-            "-"
-            if pd.isna(selected_trade["hold_through_peak_pnl_sol"])
-            else f"{selected_trade['hold_through_peak_pnl_sol']:.4f}",
+            format_sol(selected_trade["hold_through_peak_pnl_sol"]),
         )
-    st.dataframe(closed_trades, width="stretch")
+    render_dataframe(closed_trades)
 
 elif page == "Channel Performance":
-    st.dataframe(
-        query("select * from channel_performance order by overall_score desc"), width="stretch"
-    )
+    render_dataframe(query("select * from channel_performance order by overall_score desc"))
 
 elif page == "Token Detail":
     token = st.text_input("Token address")
     if token:
         st.subheader("Events")
-        st.dataframe(
+        render_dataframe(
             query(
                 """
                 with latest_market as (
@@ -796,11 +786,10 @@ elif page == "Token Detail":
                 where e.token_address=:token
                 """,
                 {"token": token},
-            ),
-            width="stretch",
+            )
         )
         st.subheader("Market Snapshots")
-        st.dataframe(
+        render_dataframe(
             query(
                 """
                 select datetime(snapshot_time, '+9 hours') as snapshot_time_kst,
@@ -809,11 +798,10 @@ elif page == "Token Detail":
                 from token_market_snapshots where token_address=:token order by snapshot_time desc
                 """,
                 {"token": token},
-            ),
-            width="stretch",
+            )
         )
         st.subheader("Wallet Activity")
-        st.dataframe(
+        render_dataframe(
             query(
                 """
                 select datetime(created_at, '+9 hours') as created_at_kst,
@@ -822,8 +810,7 @@ elif page == "Token Detail":
                 from wallet_activity_snapshots where token_address=:token order by created_at desc
                 """,
                 {"token": token},
-            ),
-            width="stretch",
+            )
         )
 
 elif page == "Settings Preview":
