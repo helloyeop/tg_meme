@@ -14,6 +14,9 @@ live:
     below_500k_pct: 30
     from_500k_to_below_1m_pct: 20
     at_or_above_1m_pct: 10
+  require_entry_round_trip_quote: true
+  min_entry_round_trip_recovery_pct: 90
+  executable_stop_loss_pct: -20
   take_profit_retry_seconds: 30
   stop_loss_pct: -70
   daily_max_loss_sol: 1

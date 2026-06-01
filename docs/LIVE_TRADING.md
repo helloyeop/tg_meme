@@ -12,6 +12,12 @@ tables and a separate engine so experiments do not change paper-trading history.
   `+10%` at or above `$1M`. The emergency stop-loss remains `-70%`.
 - The app refuses new entries after `1 SOL` of realized live losses in a day.
 - The isolated signer applies an additional `1 SOL` daily BUY spend ceiling.
+- Before staging a live entry, the pipeline requests a Jupiter
+  `SOL -> token -> SOL` round-trip quote. Entries are refused when the
+  immediately executable recovery is below `90%`.
+- Open live positions are also monitored with Jupiter full-position SELL
+  quotes. A quote-based `-20%` executable loss stages a protective SELL before
+  the market-cap-based `-70%` emergency stop-loss.
 
 ## Signer Isolation
 
@@ -162,6 +168,11 @@ If a take-profit SELL is refused because the quote is below the minimum output,
 the order remains recorded as `FAILED` and the position returns to `OPEN`.
 The pipeline keeps monitoring the position and may stage a new SELL after the
 configured retry cooldown, which defaults to 30 seconds.
+
+Jupiter quote previews are authenticated signer calls that do not sign or
+submit transactions. Sanitized quote details are written to `live_quote_audits`
+without the assembled transaction so operators can compare DexScreener market
+cap with the actually executable SOL recovery.
 
 ## Enable And Emergency Stop
 

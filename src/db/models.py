@@ -432,6 +432,27 @@ class LiveOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 
+class LiveQuoteAudit(Base):
+    __tablename__ = "live_quote_audits"
+    __table_args__ = (Index("idx_live_quote_audits_token_time", "token_address", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("token_call_events.id"))
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("live_positions.id"))
+    token_address: Mapped[str] = mapped_column(String, nullable=False)
+    quote_type: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    input_amount_raw: Mapped[str | None] = mapped_column(String)
+    output_amount_raw: Mapped[str | None] = mapped_column(String)
+    recovery_pct: Mapped[float | None] = mapped_column(Float)
+    price_impact: Mapped[float | None] = mapped_column(Float)
+    slippage_bps: Mapped[float | None] = mapped_column(Float)
+    fee_bps: Mapped[float | None] = mapped_column(Float)
+    reason: Mapped[str | None] = mapped_column(Text)
+    raw_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+
+
 class AppError(Base):
     __tablename__ = "app_errors"
 

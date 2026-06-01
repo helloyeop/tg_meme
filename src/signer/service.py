@@ -25,6 +25,12 @@ class SwapRequest(BaseModel):
     min_output_amount: int | None = Field(default=None, gt=0)
 
 
+class QuoteRequest(BaseModel):
+    side: str
+    token_address: str = Field(min_length=32, max_length=64)
+    amount: int = Field(gt=0)
+
+
 class SignerRuntime:
     def __init__(self):
         self.settings = get_settings()
@@ -75,6 +81,39 @@ class SignerRuntime:
         return self._submit_and_record(
             request, side, signed_transaction, order["requestId"], order
         )
+
+    def quote(self, request: QuoteRequest) -> dict:
+        side = request.side.upper()
+        if side == "BUY":
+            input_mint, output_mint = WRAPPED_SOL_MINT, request.token_address
+        elif side == "SELL":
+            input_mint, output_mint = request.token_address, WRAPPED_SOL_MINT
+        else:
+            raise HTTPException(400, "Only BUY and SELL quotes are supported.")
+        return self._quote_response(
+            self._get_order(input_mint, output_mint, request.amount),
+            side=side,
+        )
+
+    def quote_buy_round_trip(self, request: QuoteRequest) -> dict:
+        if request.side.upper() != "BUY":
+            raise HTTPException(400, "Round-trip quotes must start with BUY.")
+        buy = self.quote(request)
+        sell = self.quote(
+            QuoteRequest(
+                side="SELL",
+                token_address=request.token_address,
+                amount=int(buy["out_amount"]),
+            )
+        )
+        return {
+            "side": "BUY_ROUND_TRIP",
+            "token_address": request.token_address,
+            "input_amount": request.amount,
+            "buy": buy,
+            "sell": sell,
+            "recovery_pct": 100 * int(sell["out_amount"]) / request.amount,
+        }
 
     def _submit_and_record(
         self,
@@ -197,6 +236,21 @@ class SignerRuntime:
         if min_output_amount is not None and int(order["outAmount"]) < min_output_amount:
             raise HTTPException(409, "Jupiter output quote is below the requested minimum.")
         return order
+
+    @staticmethod
+    def _quote_response(order: dict, *, side: str) -> dict:
+        return {
+            "side": side,
+            "input_mint": order.get("inputMint"),
+            "output_mint": order.get("outputMint"),
+            "in_amount": order.get("inAmount"),
+            "out_amount": order.get("outAmount"),
+            "out_usd_value": order.get("outUsdValue"),
+            "price_impact": order.get("priceImpact"),
+            "slippage_bps": order.get("slippageBps"),
+            "fee_bps": order.get("feeBps"),
+            "route_plan": order.get("routePlan"),
+        }
 
     def _sign(self, transaction: str) -> str:
         tx = VersionedTransaction.from_bytes(base64.b64decode(transaction))
@@ -386,3 +440,13 @@ def swap(request: SwapRequest) -> dict:
         raise
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/quote", dependencies=[Depends(require_auth)])
+def quote(request: QuoteRequest) -> dict:
+    return SignerRuntime().quote(request)
+
+
+@app.post("/quote/buy-round-trip", dependencies=[Depends(require_auth)])
+def quote_buy_round_trip(request: QuoteRequest) -> dict:
+    return SignerRuntime().quote_buy_round_trip(request)

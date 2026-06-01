@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -8,6 +9,7 @@ from data_sources.aggregator import DataSourceAggregator
 from db.models import (
     ChannelPerformance,
     LivePosition,
+    LiveQuoteAudit,
     PaperPosition,
     TelegramMessage,
     TokenCallEvent,
@@ -26,7 +28,7 @@ from db.session import SessionLocal
 from events.context import ContextResolution, MessageContextResolver
 from events.manager import CallEventManager
 from live.engine import LiveTradingEngine
-from live.execution import LiveOrderExecutor
+from live.execution import LAMPORTS_PER_SOL, LiveOrderExecutor
 from llm.classifier import LLMClassifier
 from paper.engine import PaperTradingEngine
 from scoring.engine import ScoringEngine
@@ -152,11 +154,17 @@ class MessagePipeline:
                             market_data=market_data,
                             decision=decision,
                         )
+                        round_trip_recovery_pct = self._entry_round_trip_recovery_pct(
+                            session,
+                            event=event,
+                            paper_opened=decision.opened,
+                        )
                         self.live.maybe_stage_entry(
                             session,
                             event=event,
                             market_data=market_data,
                             paper_opened=decision.opened,
+                            round_trip_recovery_pct=round_trip_recovery_pct,
                         )
                     session.commit()
                     processed += 1
@@ -333,14 +341,135 @@ class MessagePipeline:
                 market_data = market_by_token.get(position.token_address)
                 if market_data is None or market_data.market_cap_usd is None:
                     continue
+                quoted_output_lamports = self._sell_quote_output_lamports(
+                    session,
+                    position=position,
+                )
                 self.live.evaluate_exit(
                     session,
                     position=position,
                     current_market_cap_usd=market_data.market_cap_usd,
+                    quoted_output_lamports=quoted_output_lamports,
                 )
                 refreshed += 1
             session.commit()
         return refreshed
+
+    def _entry_round_trip_recovery_pct(
+        self,
+        session,
+        *,
+        event: TokenCallEvent,
+        paper_opened: bool,
+    ) -> float | None:
+        settings = get_settings()
+        if (
+            not paper_opened
+            or not settings.live_order_staging_enabled
+            or settings.live_execution_adapter != "signer_service"
+        ):
+            return None
+        amount = int(self.live._entry_size_sol(event) * LAMPORTS_PER_SOL)
+        try:
+            quote = self.live_executor.signer.quote_buy_round_trip(
+                token_address=event.token_address,
+                amount=amount,
+            )
+        except Exception as exc:
+            self._store_live_quote_audit(
+                session,
+                event_id=event.id,
+                token_address=event.token_address,
+                quote_type="ENTRY_ROUND_TRIP",
+                status="ERROR",
+                input_amount=amount,
+                reason=str(exc),
+            )
+            return None
+        self._store_live_quote_audit(
+            session,
+            event_id=event.id,
+            token_address=event.token_address,
+            quote_type="ENTRY_ROUND_TRIP",
+            status="QUOTED",
+            input_amount=amount,
+            output_amount=int(quote["sell"]["out_amount"]),
+            recovery_pct=float(quote["recovery_pct"]),
+            quote=quote,
+        )
+        return float(quote["recovery_pct"])
+
+    def _sell_quote_output_lamports(self, session, *, position: LivePosition) -> int | None:
+        if not position.token_amount_raw:
+            return None
+        try:
+            quote = self.live_executor.signer.quote_sell(
+                token_address=position.token_address,
+                amount=int(position.token_amount_raw),
+            )
+        except Exception as exc:
+            self._store_live_quote_audit(
+                session,
+                event_id=position.event_id,
+                position_id=position.id,
+                token_address=position.token_address,
+                quote_type="EXIT_SELL",
+                status="ERROR",
+                input_amount=int(position.token_amount_raw),
+                reason=str(exc),
+            )
+            return None
+        output_amount = int(quote["out_amount"])
+        entry_input = int(
+            position.entry_input_lamports or position.entry_size_sol * LAMPORTS_PER_SOL
+        )
+        self._store_live_quote_audit(
+            session,
+            event_id=position.event_id,
+            position_id=position.id,
+            token_address=position.token_address,
+            quote_type="EXIT_SELL",
+            status="QUOTED",
+            input_amount=int(position.token_amount_raw),
+            output_amount=output_amount,
+            recovery_pct=100 * output_amount / entry_input,
+            quote=quote,
+        )
+        return output_amount
+
+    @staticmethod
+    def _store_live_quote_audit(
+        session,
+        *,
+        event_id: int,
+        token_address: str,
+        quote_type: str,
+        status: str,
+        input_amount: int,
+        position_id: int | None = None,
+        output_amount: int | None = None,
+        recovery_pct: float | None = None,
+        quote: dict | None = None,
+        reason: str | None = None,
+    ) -> None:
+        detail = quote.get("sell", quote) if quote else {}
+        session.add(
+            LiveQuoteAudit(
+                event_id=event_id,
+                position_id=position_id,
+                token_address=token_address,
+                quote_type=quote_type,
+                status=status,
+                input_amount_raw=str(input_amount),
+                output_amount_raw=str(output_amount) if output_amount is not None else None,
+                recovery_pct=recovery_pct,
+                price_impact=detail.get("price_impact"),
+                slippage_bps=detail.get("slippage_bps"),
+                fee_bps=detail.get("fee_bps"),
+                reason=reason,
+                raw_json=json.dumps(quote) if quote else None,
+            )
+        )
 
     def execute_live_orders(self) -> int:
         with SessionLocal() as session:

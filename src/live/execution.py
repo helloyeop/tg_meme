@@ -115,6 +115,32 @@ class SignerClient:
             response.raise_for_status()
             return response.json()
 
+    def quote_sell(self, *, token_address: str, amount: int) -> dict:
+        return self._quote(
+            "/quote",
+            {"side": "SELL", "token_address": token_address, "amount": amount},
+        )
+
+    def quote_buy_round_trip(self, *, token_address: str, amount: int) -> dict:
+        return self._quote(
+            "/quote/buy-round-trip",
+            {"side": "BUY", "token_address": token_address, "amount": amount},
+        )
+
+    def _quote(self, path: str, payload: dict) -> dict:
+        if self.settings.live_execution_adapter != "signer_service":
+            raise LiveExecutionDisabled("Signer service quoting is disabled.")
+        if not self.settings.live_signer_auth_token:
+            raise LiveExecutionDisabled("LIVE_SIGNER_AUTH_TOKEN is not configured.")
+        with httpx.Client(timeout=30) as client:
+            response = client.post(
+                f"{self.settings.live_signer_base_url.rstrip('/')}{path}",
+                headers={"Authorization": f"Bearer {self.settings.live_signer_auth_token}"},
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
 
 class LiveOrderExecutor:
     """Executes staged orders through the isolated signer and updates the live ledger."""

@@ -8,6 +8,8 @@ from app.settings import get_settings
 from data_sources.types import TokenMarketData
 from db.models import LiveOrder, LivePosition, TokenCallEvent
 
+LAMPORTS_PER_SOL = 1_000_000_000
+
 
 @dataclass
 class LiveDecision:
@@ -32,6 +34,7 @@ class LiveTradingEngine:
         event: TokenCallEvent,
         market_data: TokenMarketData | None,
         paper_opened: bool,
+        round_trip_recovery_pct: float | None = None,
         now: datetime | None = None,
     ) -> LiveDecision:
         now = now or datetime.utcnow()
@@ -54,6 +57,13 @@ class LiveTradingEngine:
             return LiveDecision(False, "live_entry_size_exceeds_cap")
         if self._daily_realized_loss_sol(session, now) >= self.live.get("daily_max_loss_sol", 1):
             return LiveDecision(False, "live_daily_loss_limit_reached")
+        if self.live.get("require_entry_round_trip_quote", False):
+            if round_trip_recovery_pct is None:
+                return LiveDecision(False, "live_entry_round_trip_quote_unavailable")
+            if round_trip_recovery_pct < self.live.get(
+                "min_entry_round_trip_recovery_pct", 90
+            ):
+                return LiveDecision(False, "live_entry_round_trip_recovery_too_low")
 
         take_profit_pct = self._take_profit_pct(market_data.market_cap_usd)
         stop_loss_pct = self.live.get("stop_loss_pct", -70)
@@ -98,6 +108,7 @@ class LiveTradingEngine:
         *,
         position: LivePosition,
         current_market_cap_usd: float,
+        quoted_output_lamports: int | None = None,
         now: datetime | None = None,
     ) -> LiveDecision:
         now = now or datetime.utcnow()
@@ -108,12 +119,20 @@ class LiveTradingEngine:
             return LiveDecision(False, "live_position_not_open", position=position)
         if self._has_pending_exit(session, position.id):
             return LiveDecision(False, "live_exit_already_staged", position=position)
-        if current_market_cap_usd >= position.target_market_cap_usd:
+        quoted_return_pct = self._quoted_return_pct(position, quoted_output_lamports)
+        if quoted_return_pct is not None and quoted_return_pct >= position.target_profit_pct:
             if self._has_recent_failed_take_profit(session, position.id, now):
                 return LiveDecision(False, "live_take_profit_retry_cooldown", position=position)
             reason = f"take_profit_{position.target_profit_pct:g}_pct"
+        elif quoted_return_pct is not None and quoted_return_pct <= self.live.get(
+            "executable_stop_loss_pct", -20
+        ):
+            executable_stop_loss_pct = abs(self.live.get("executable_stop_loss_pct", -20))
+            reason = f"executable_stop_loss_{executable_stop_loss_pct:g}_pct"
         elif current_market_cap_usd <= position.stop_loss_market_cap_usd:
             reason = "emergency_stop_loss_70_pct"
+        elif current_market_cap_usd >= position.target_market_cap_usd:
+            return LiveDecision(False, "live_take_profit_quote_below_target", position=position)
         else:
             return LiveDecision(False, "live_exit_threshold_not_reached", position=position)
 
@@ -209,3 +228,15 @@ class LiveTradingEngine:
         if entry_market_cap_usd < 1_000_000:
             return tiers.get("from_500k_to_below_1m_pct", default)
         return tiers.get("at_or_above_1m_pct", default)
+
+    def _quoted_return_pct(
+        self,
+        position: LivePosition,
+        quoted_output_lamports: int | None,
+    ) -> float | None:
+        if quoted_output_lamports is None:
+            return None
+        entry_input_lamports = int(
+            position.entry_input_lamports or position.entry_size_sol * LAMPORTS_PER_SOL
+        )
+        return 100 * (quoted_output_lamports / entry_input_lamports - 1)

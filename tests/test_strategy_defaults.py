@@ -19,6 +19,9 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
         "from_500k_to_below_1m_pct": 20,
         "at_or_above_1m_pct": 10,
     }
+    assert strategy["live"]["require_entry_round_trip_quote"] is True
+    assert strategy["live"]["min_entry_round_trip_recovery_pct"] == 90
+    assert strategy["live"]["executable_stop_loss_pct"] == -20
     assert strategy["live"]["take_profit_retry_seconds"] == 30
     assert strategy["live"]["stop_loss_pct"] == -70
     assert strategy["live"]["daily_max_loss_sol"] == 1

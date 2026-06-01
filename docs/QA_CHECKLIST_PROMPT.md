@@ -32,6 +32,9 @@ Validate the current behavior:
 - Closed paper positions are observed after exit on a slower default 15-minute interval for counterfactual low/peak/latest results, reusing a recent existing token snapshot instead of making an extra request.
 - A new live position fixes its take-profit target from entry-time market cap: +30% below $500K, +20% from $500K to below $1M, and +10% at or above $1M.
 - Existing live positions keep their stored target_profit_pct and target_market_cap_usd; strategy edits are not applied retroactively.
+- New live entries require a Jupiter SOL -> token -> SOL preview with at least 90% immediately executable recovery.
+- Open live positions receive Jupiter full-position SELL previews, and a quote-based -20% executable loss stages a protective SELL before the market-cap-based emergency stop.
+- Sanitized Jupiter quote audit rows persist recovery, price impact, slippage, and fee fields without persisting an assembled transaction.
 - The fast monitor batches no more than 30 Solana token addresses per DexScreener request and keeps an internal request budget below the documented API limit.
 - Large market/security API raw snapshot JSON storage defaults to off while normalized fields remain available.
 - Telegram alerts are outbound personal bot messages only.

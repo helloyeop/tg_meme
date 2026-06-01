@@ -684,6 +684,19 @@ elif page == "Live Trading":
             """
         )
     )
+    st.subheader("Jupiter Quote Audits")
+    render_dataframe(
+        query(
+            """
+            select datetime(created_at, '+9 hours') as created_at_kst,
+                   position_id, token_address, quote_type, status,
+                   recovery_pct, price_impact, slippage_bps, fee_bps, reason
+            from live_quote_audits
+            order by created_at desc, id desc
+            limit 500
+            """
+        )
+    )
 
 elif page == "Closed Trades":
     closed_trades = query(

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from signer.service import SignerRuntime, SwapRequest
+from signer.service import QuoteRequest, SignerRuntime, SwapRequest
 
 
 def runtime_with_ledger(path: Path) -> SignerRuntime:
@@ -99,3 +99,44 @@ def test_signer_ledger_migrates_minimum_output_column(tmp_path: Path) -> None:
         }
 
     assert "min_output_amount" in columns
+
+
+def test_signer_round_trip_quote_reports_executable_recovery(tmp_path: Path) -> None:
+    runtime = runtime_with_ledger(tmp_path / "signer.db")
+    orders = iter(
+        [
+            {
+                "inputMint": "sol",
+                "outputMint": "token",
+                "inAmount": "500000000",
+                "outAmount": "1000",
+                "priceImpact": "0.01",
+                "slippageBps": 50,
+                "feeBps": 10,
+                "routePlan": [],
+            },
+            {
+                "inputMint": "token",
+                "outputMint": "sol",
+                "inAmount": "1000",
+                "outAmount": "450000000",
+                "priceImpact": "0.02",
+                "slippageBps": 50,
+                "feeBps": 10,
+                "routePlan": [],
+            },
+        ]
+    )
+    runtime._get_order = lambda *_: next(orders)
+
+    quote = runtime.quote_buy_round_trip(
+        QuoteRequest(
+            side="BUY",
+            token_address="So11111111111111111111111111111111111111112",
+            amount=500_000_000,
+        )
+    )
+
+    assert quote["recovery_pct"] == 90
+    assert quote["buy"]["out_amount"] == "1000"
+    assert quote["sell"]["out_amount"] == "450000000"
