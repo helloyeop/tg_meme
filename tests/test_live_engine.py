@@ -230,7 +230,7 @@ def test_live_entry_refuses_low_round_trip_recovery() -> None:
     assert decision.reason == "live_entry_round_trip_recovery_too_low"
 
 
-def test_live_executable_quote_drawdown_stages_protective_sell() -> None:
+def test_live_executable_quote_drawdown_does_not_stage_sell_above_emergency_stop() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
@@ -258,18 +258,16 @@ def test_live_executable_quote_drawdown_stages_protective_sell() -> None:
     )
     session.add(position)
     session.flush()
-    strategy = live_strategy()
-    strategy["live"]["executable_stop_loss_pct"] = -20
-
-    decision = LiveTradingEngine(strategy, live_settings()).evaluate_exit(
+    decision = LiveTradingEngine(live_strategy(), live_settings()).evaluate_exit(
         session,
         position=position,
         current_market_cap_usd=90000,
         quoted_output_lamports=390000000,
     )
 
-    assert decision.staged is True
-    assert session.scalar(select(LiveOrder)).reason == "executable_stop_loss_20_pct"
+    assert decision.staged is False
+    assert decision.reason == "live_exit_threshold_not_reached"
+    assert session.scalar(select(LiveOrder)) is None
 
 
 def test_live_emergency_stop_loss_stages_sell_order() -> None:

@@ -16,8 +16,8 @@ tables and a separate engine so experiments do not change paper-trading history.
   `SOL -> token -> SOL` round-trip quote. Entries are refused when the
   immediately executable recovery is below `90%`.
 - Open live positions are also monitored with Jupiter full-position SELL
-  quotes. A quote-based `-20%` executable loss stages a protective SELL before
-  the market-cap-based `-70%` emergency stop-loss.
+  quotes for executable take-profit evaluation and audit records. The only
+  live stop-loss is the market-cap-based `-70%` emergency stop-loss.
 
 ## Signer Isolation
 

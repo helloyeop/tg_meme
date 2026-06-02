@@ -124,11 +124,6 @@ class LiveTradingEngine:
             if self._has_recent_failed_take_profit(session, position.id, now):
                 return LiveDecision(False, "live_take_profit_retry_cooldown", position=position)
             reason = f"take_profit_{position.target_profit_pct:g}_pct"
-        elif quoted_return_pct is not None and quoted_return_pct <= self.live.get(
-            "executable_stop_loss_pct", -20
-        ):
-            executable_stop_loss_pct = abs(self.live.get("executable_stop_loss_pct", -20))
-            reason = f"executable_stop_loss_{executable_stop_loss_pct:g}_pct"
         elif current_market_cap_usd <= position.stop_loss_market_cap_usd:
             reason = "emergency_stop_loss_70_pct"
         elif current_market_cap_usd >= position.target_market_cap_usd:
