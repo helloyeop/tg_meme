@@ -55,6 +55,7 @@ const items = [
   ["LLM", "BUY_CALL/WARNING/SOLD/TAKE_PROFIT의 낮은 confidence 결과는 gpt-5.4-mini 재검토가 가능하다."],
   ["LLM", "message_analysis에 model, review 여부, token usage, latency가 저장되어 비용과 속도를 점검할 수 있다."],
   ["LLM", "LLM 키가 없으면 keyword fallback으로 UNKNOWN/NOISE 계열 분석을 저장하며 파이프라인이 중단되지 않는다."],
+  ["LLM", "감시 콜 채널에 Solana CA가 게시되면 명시적 warning/sold/take-profit/bearish가 아닌 한 actionable BUY_CALL로 보정된다."],
   ["Context", "CA만 있는 메시지 앞 60초 안에 같은 채널의 미사용 진입 문맥이 정확히 하나 있으면 LLM에 함께 전달되고 연결 기록이 저장된다."],
   ["Context", "설명과 CA가 함께 있는 게시글은 직전 문맥을 상속하지 않으며, 30초 간격으로 여러 진입 후보가 겹치면 ambiguous로 기록되어 문맥 기반 자동 진입을 하지 않는다."],
   ["Events", "같은 channel_id + token_address 반복 언급은 하나의 token_call_events 행으로 병합된다."],

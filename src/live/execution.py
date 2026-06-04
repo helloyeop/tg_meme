@@ -185,6 +185,14 @@ class LiveOrderExecutor:
                     order.raw_json = json.dumps({"error": str(exc)})
                     position.status = "OPEN"
                     position.exit_requested_time = None
+                elif exc.response.status_code == 400:
+                    order.status = "FAILED"
+                    order.raw_json = json.dumps({"error": str(exc)})
+                    if order.side == "BUY":
+                        position.status = "ENTRY_FAILED"
+                    elif order.side == "SELL":
+                        position.status = "OPEN"
+                        position.exit_requested_time = None
                 else:
                     order.status = "STAGED"
                     order.raw_json = json.dumps({"error": str(exc)})

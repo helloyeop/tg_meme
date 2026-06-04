@@ -17,6 +17,7 @@ Validate the current behavior:
 - LLM usage tokens, latency, and whether a message was reviewed are stored for cost monitoring.
 - A CA-only post can combine with exactly one unused same-channel action-bearing message from the prior configured context window (default 60 seconds).
 - A self-contained CA post never inherits earlier context, and multiple candidate action messages are marked ambiguous without contextual auto-entry.
+- In monitored call channels, a Solana CA post is treated as an actionable BUY_CALL unless it is explicitly warning, bearish, sold, or take-profit related.
 - Only Solana contract addresses are extracted.
 - Same channel + same CA is merged into one Call Event, including re-entry/round 2/back in messages.
 - An explicit same-channel recall after the default 60-minute cooldown remains in the same Call Event but creates a new actionable signal anchor.

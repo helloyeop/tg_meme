@@ -445,6 +445,66 @@ def test_failed_take_profit_sell_reopens_position_for_monitoring() -> None:
     assert position.exit_requested_time is None
 
 
+def test_failed_buy_with_signer_bad_request_marks_entry_failed() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    position = LivePosition(
+        event_id=event.id,
+        channel_id="channel",
+        token_address="mint",
+        status="ENTRY_REQUESTED",
+        entry_time=datetime.utcnow(),
+        entry_market_cap_usd=100000,
+        entry_size_sol=0.5,
+        target_profit_pct=10,
+        target_market_cap_usd=110000,
+        stop_loss_pct=-70,
+        stop_loss_market_cap_usd=30000,
+        highest_market_cap_usd=100000,
+    )
+    session.add(position)
+    session.flush()
+    order = LiveOrder(
+        event_id=event.id,
+        position_id=position.id,
+        channel_id="channel",
+        token_address="mint",
+        side="BUY",
+        status="STAGED",
+        reason="signal_entry",
+        requested_at=datetime.utcnow(),
+        requested_size_sol=0.5,
+    )
+    session.add(order)
+    session.flush()
+    response = httpx.Response(400, request=httpx.Request("POST", "http://signer/swap"))
+    signer = SimpleNamespace(
+        execute=lambda **_: (_ for _ in ()).throw(
+            httpx.HTTPStatusError(
+                "Requested BUY exceeds available SOL after fee reserve.",
+                request=response.request,
+                response=response,
+            )
+        )
+    )
+
+    count = LiveOrderExecutor(
+        live_settings(live_execution_adapter="signer_service"), signer
+    ).execute_staged_orders(session)
+
+    assert count == 0
+    assert order.status == "FAILED"
+    assert position.status == "ENTRY_FAILED"
+
+
 def test_recent_failed_take_profit_sell_applies_retry_cooldown() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

@@ -29,12 +29,41 @@ from events.context import ContextResolution, MessageContextResolver
 from events.manager import CallEventManager
 from live.engine import LiveTradingEngine
 from live.execution import LAMPORTS_PER_SOL, LiveOrderExecutor
-from llm.classifier import LLMClassifier
+from llm.classifier import LLMClassifier, MessageClassification
 from paper.engine import PaperTradingEngine
 from scoring.engine import ScoringEngine
 from telegram.ca_extractor import extract_solana_addresses
 
 logger = logging.getLogger(__name__)
+
+
+CA_POST_BLOCKING_INTENTS = {"WARNING", "SOLD", "TAKE_PROFIT", "UPDATE_BEARISH"}
+
+
+def coerce_ca_post_to_buy_call(
+    classification: MessageClassification, addresses: list[str]
+) -> MessageClassification:
+    """Treat a posted Solana CA as an actionable call unless the message is clearly defensive."""
+    if not addresses or classification.intent == "BUY_CALL":
+        return classification
+    if classification.intent in CA_POST_BLOCKING_INTENTS:
+        return classification
+    if classification.contains_warning or classification.is_exit_signal:
+        return classification
+
+    classification.intent = "BUY_CALL"
+    classification.confidence = max(classification.confidence or 0, 0.65)
+    classification.sentiment = classification.sentiment or "BULLISH"
+    classification.urgency = classification.urgency or "MEDIUM"
+    classification.is_new_call = True
+    classification.is_follow_up = False
+    reason = classification.reason or ""
+    suffix = (
+        "CA post policy: Solana CA was posted in a monitored call channel, so it "
+        "is treated as an actionable BUY_CALL unless explicitly bearish or exit-related."
+    )
+    classification.reason = f"{reason} {suffix}".strip()
+    return classification
 
 
 class MessagePipeline:
@@ -76,6 +105,7 @@ class MessagePipeline:
                         addresses,
                         preceding_context=linked_message.raw_text if linked_message else None,
                     )
+                    classification = coerce_ca_post_to_buy_call(classification, addresses)
                     if context.relation:
                         classification.context_relation = context.relation
                         classification.context_message_ids = [
