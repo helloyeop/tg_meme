@@ -24,7 +24,7 @@ live:
   max_entry_size_sol: 0.5
 
 entry:
-  final_signal_score_min: 45
+  final_signal_score_min: 5
   risk_score_min: 60
   max_time_since_first_call_minutes: 5
   max_market_cap_increase_since_first_call_pct: 150
