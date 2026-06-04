@@ -31,11 +31,52 @@ class TelegramAlertBot:
         return True
 
 
+def short_token_address(token_address: str) -> str:
+    if len(token_address) <= 14:
+        return token_address
+    return f"{token_address[:6]}...{token_address[-6:]}"
+
+
+def format_token_label(
+    token_address: str,
+    *,
+    symbol: str | None = None,
+    name: str | None = None,
+) -> str:
+    if name and symbol:
+        return f"{name} ({symbol})"
+    if symbol:
+        return symbol
+    if name:
+        return name
+    return short_token_address(token_address)
+
+
+def format_usd(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    if abs(value) >= 1_000_000:
+        return f"${value / 1_000_000:.2f}M"
+    if abs(value) >= 1_000:
+        return f"${value / 1_000:.0f}K"
+    return f"${value:,.0f}"
+
+
 def format_high_score_alert(token_address: str, channel_id: str, score: float) -> str:
-    return f"High-score paper signal\nChannel: {channel_id}\nToken: {token_address}\nScore: {score:.1f}"
+    return (
+        "High-score paper signal\n"
+        f"Channel: {channel_id}\n"
+        f"Token: {token_address}\n"
+        f"Score: {score:.1f}"
+    )
 
 
-def format_paper_buy_alert(token_address: str, channel_id: str, size_sol: float, market_cap_usd: float) -> str:
+def format_paper_buy_alert(
+    token_address: str,
+    channel_id: str,
+    size_sol: float,
+    market_cap_usd: float,
+) -> str:
     return (
         "Paper BUY opened\n"
         f"Channel: {channel_id}\n"

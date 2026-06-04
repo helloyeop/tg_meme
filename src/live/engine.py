@@ -1,14 +1,17 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from alerts.bot import TelegramAlertBot, format_token_label, format_usd, short_token_address
 from app.settings import get_settings
 from data_sources.types import TokenMarketData
-from db.models import LiveOrder, LivePosition, TokenCallEvent
+from db.models import LiveOrder, LivePosition, TokenCallEvent, TokenMarketSnapshot
 
 LAMPORTS_PER_SOL = 1_000_000_000
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -22,10 +25,11 @@ class LiveDecision:
 class LiveTradingEngine:
     """Stages live order intents while keeping transaction submission disabled."""
 
-    def __init__(self, strategy: dict | None = None, settings=None):
+    def __init__(self, strategy: dict | None = None, settings=None, alerts=None):
         self.settings = settings or get_settings()
         self.strategy = strategy or self.settings.load_strategy_config()
         self.live = self.strategy.get("live", {})
+        self.alerts = alerts or TelegramAlertBot()
 
     def maybe_stage_entry(
         self,
@@ -100,6 +104,7 @@ class LiveTradingEngine:
         )
         session.add(order)
         session.flush()
+        self._send_entry_staged_alert(order, position, market_data)
         return LiveDecision(True, "entry_staged", order, position)
 
     def evaluate_exit(
@@ -147,6 +152,13 @@ class LiveTradingEngine:
         )
         session.add(order)
         session.flush()
+        self._send_exit_staged_alert(
+            session,
+            order,
+            position,
+            current_market_cap_usd=current_market_cap_usd,
+            quoted_output_lamports=quoted_output_lamports,
+        )
         return LiveDecision(True, f"{reason}_exit_staged", order, position)
 
     def _daily_realized_loss_sol(self, session: Session, now: datetime) -> float:
@@ -235,3 +247,90 @@ class LiveTradingEngine:
             position.entry_input_lamports or position.entry_size_sol * LAMPORTS_PER_SOL
         )
         return 100 * (quoted_output_lamports / entry_input_lamports - 1)
+
+    def _send_entry_staged_alert(
+        self,
+        order: LiveOrder,
+        position: LivePosition,
+        market_data: TokenMarketData,
+    ) -> None:
+        label = format_token_label(
+            position.token_address,
+            symbol=market_data.symbol,
+            name=market_data.name,
+        )
+        try:
+            self.alerts.send_message(
+                "\n".join(
+                    [
+                        "Live BUY staged",
+                        f"Token: {label}",
+                        f"CA: {short_token_address(position.token_address)}",
+                        f"Channel: {position.channel_id}",
+                        f"Size: {position.entry_size_sol:g} SOL",
+                        f"Entry MC: {format_usd(position.entry_market_cap_usd)}",
+                        (
+                            f"TP: +{position.target_profit_pct:g}% -> "
+                            f"{format_usd(position.target_market_cap_usd)}"
+                        ),
+                        (
+                            f"Emergency SL: {position.stop_loss_pct:g}% -> "
+                            f"{format_usd(position.stop_loss_market_cap_usd)}"
+                        ),
+                        f"Order: #{order.id}",
+                    ]
+                )
+            )
+        except Exception:
+            logger.exception("Failed to send live BUY staged Telegram alert")
+
+    def _send_exit_staged_alert(
+        self,
+        session: Session,
+        order: LiveOrder,
+        position: LivePosition,
+        *,
+        current_market_cap_usd: float,
+        quoted_output_lamports: int | None,
+    ) -> None:
+        symbol, name = self._latest_token_identity(session, position.token_address)
+        label = format_token_label(position.token_address, symbol=symbol, name=name)
+        quoted_return_pct = self._quoted_return_pct(position, quoted_output_lamports)
+        quote_text = (
+            f"{quoted_return_pct:.1f}%"
+            if quoted_return_pct is not None
+            else "n/a"
+        )
+        try:
+            self.alerts.send_message(
+                "\n".join(
+                    [
+                        "Live SELL staged",
+                        f"Token: {label}",
+                        f"CA: {short_token_address(position.token_address)}",
+                        f"Channel: {position.channel_id}",
+                        f"Reason: {order.reason}",
+                        f"Current MC: {format_usd(current_market_cap_usd)}",
+                        f"Target MC: {format_usd(position.target_market_cap_usd)}",
+                        f"Quoted return: {quote_text}",
+                        f"Order: #{order.id}",
+                    ]
+                )
+            )
+        except Exception:
+            logger.exception("Failed to send live SELL staged Telegram alert")
+
+    @staticmethod
+    def _latest_token_identity(
+        session: Session,
+        token_address: str,
+    ) -> tuple[str | None, str | None]:
+        snapshot = session.scalars(
+            select(TokenMarketSnapshot)
+            .where(TokenMarketSnapshot.token_address == token_address)
+            .order_by(TokenMarketSnapshot.snapshot_time.desc(), TokenMarketSnapshot.id.desc())
+            .limit(1)
+        ).first()
+        if snapshot is None:
+            return None, None
+        return snapshot.symbol, snapshot.name

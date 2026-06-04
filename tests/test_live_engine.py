@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from data_sources.types import TokenMarketData
-from db.models import Base, LiveOrder, LivePosition, TokenCallEvent
+from db.models import Base, LiveOrder, LivePosition, TokenCallEvent, TokenMarketSnapshot
 from live.engine import LiveTradingEngine
 from live.execution import JupiterSwapClient, LiveExecutionDisabled, LiveOrderExecutor
 
@@ -71,6 +71,40 @@ def test_live_entry_staging_is_separate_from_paper_position() -> None:
     assert decision.position.target_profit_pct == 30
     assert decision.position.target_market_cap_usd == pytest.approx(130000)
     assert session.scalar(select(LiveOrder)).side == "BUY"
+
+
+def test_live_entry_staging_sends_token_identity_alert() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    messages: list[str] = []
+    alerts = SimpleNamespace(send_message=messages.append)
+
+    decision = LiveTradingEngine(live_strategy(), live_settings(), alerts).maybe_stage_entry(
+        session,
+        event=event,
+        market_data=TokenMarketData(
+            source="test",
+            token_address="mint",
+            symbol="BULL",
+            name="Bull Token",
+            market_cap_usd=420_000,
+        ),
+        paper_opened=True,
+    )
+
+    assert decision.staged is True
+    assert len(messages) == 1
+    assert "Live BUY staged" in messages[0]
+    assert "Token: Bull Token (BULL)" in messages[0]
+    assert "Entry MC: $420K" in messages[0]
 
 
 @pytest.mark.parametrize(
@@ -374,6 +408,79 @@ def test_live_executor_confirms_buy_without_touching_paper_ledger() -> None:
     assert position.status == "OPEN"
     assert position.entry_input_lamports == "500000000"
     assert position.token_amount_raw == "123"
+
+
+def test_live_executor_confirmation_alert_includes_token_identity() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    session.add(
+        TokenMarketSnapshot(
+            token_address="mint",
+            source="test",
+            snapshot_time=datetime.utcnow(),
+            symbol="BULL",
+            name="Bull Token",
+            market_cap_usd=420_000,
+        )
+    )
+    position = LivePosition(
+        event_id=event.id,
+        channel_id="channel",
+        token_address="mint",
+        status="ENTRY_REQUESTED",
+        entry_time=datetime.utcnow(),
+        entry_market_cap_usd=420000,
+        entry_size_sol=0.5,
+        target_profit_pct=30,
+        target_market_cap_usd=546000,
+        stop_loss_pct=-70,
+        stop_loss_market_cap_usd=126000,
+        highest_market_cap_usd=420000,
+    )
+    session.add(position)
+    session.flush()
+    session.add(
+        LiveOrder(
+            event_id=event.id,
+            position_id=position.id,
+            channel_id="channel",
+            token_address="mint",
+            side="BUY",
+            status="STAGED",
+            reason="signal_entry",
+            requested_at=datetime.utcnow(),
+            requested_size_sol=0.5,
+        )
+    )
+    session.flush()
+    signer = SimpleNamespace(
+        execute=lambda **_: {
+            "status": "Success",
+            "signature": "signature",
+            "request_id": "request",
+            "output_amount": "123",
+        }
+    )
+    messages: list[str] = []
+    alerts = SimpleNamespace(send_message=messages.append)
+
+    count = LiveOrderExecutor(
+        live_settings(live_execution_adapter="signer_service"), signer, alerts
+    ).execute_staged_orders(session)
+
+    assert count == 1
+    assert len(messages) == 1
+    assert "Live BUY confirmed" in messages[0]
+    assert "Token: Bull Token (BULL)" in messages[0]
+    assert "Entry MC: $420K" in messages[0]
 
 
 def test_live_take_profit_sell_requires_ten_percent_jupiter_output() -> None:

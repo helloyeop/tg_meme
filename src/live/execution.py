@@ -6,9 +6,9 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from alerts.bot import TelegramAlertBot
+from alerts.bot import TelegramAlertBot, format_token_label, format_usd, short_token_address
 from app.settings import get_settings
-from db.models import LiveOrder, LivePosition
+from db.models import LiveOrder, LivePosition, TokenMarketSnapshot
 
 WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112"
 LAMPORTS_PER_SOL = 1_000_000_000
@@ -185,6 +185,7 @@ class LiveOrderExecutor:
                     order.raw_json = json.dumps({"error": str(exc)})
                     position.status = "OPEN"
                     position.exit_requested_time = None
+                    self._send_failure_alert(session, order, position, str(exc))
                 elif exc.response.status_code == 400:
                     order.status = "FAILED"
                     order.raw_json = json.dumps({"error": str(exc)})
@@ -193,6 +194,7 @@ class LiveOrderExecutor:
                     elif order.side == "SELL":
                         position.status = "OPEN"
                         position.exit_requested_time = None
+                    self._send_failure_alert(session, order, position, str(exc))
                 else:
                     order.status = "STAGED"
                     order.raw_json = json.dumps({"error": str(exc)})
@@ -210,6 +212,14 @@ class LiveOrderExecutor:
                 if order.side == "SELL":
                     position.status = "OPEN"
                     position.exit_requested_time = None
+                elif order.side == "BUY":
+                    position.status = "ENTRY_FAILED"
+                self._send_failure_alert(
+                    session,
+                    order,
+                    position,
+                    str(payload.get("error") or "Signer returned non-success status."),
+                )
                 continue
 
             order.status = "CONFIRMED"
@@ -228,7 +238,7 @@ class LiveOrderExecutor:
                     payload.get("wallet_balance_delta_lamports") or ""
                 )
                 position.realized_pnl_sol = self._realized_pnl_sol(position)
-            self._send_alert(order, position)
+            self._send_alert(session, order, position)
             executed += 1
         return executed
 
@@ -255,14 +265,25 @@ class LiveOrderExecutor:
             int(position.exit_output_lamports or 0) - int(position.entry_input_lamports or 0)
         ) / LAMPORTS_PER_SOL
 
-    def _send_alert(self, order: LiveOrder, position: LivePosition) -> None:
+    def _send_alert(self, session: Session, order: LiveOrder, position: LivePosition) -> None:
+        symbol, name = self._latest_token_identity(session, position.token_address)
+        label = format_token_label(position.token_address, symbol=symbol, name=name)
+        size_line = (
+            f"Size: {position.entry_size_sol:g} SOL"
+            if order.side == "BUY"
+            else f"PnL: {position.realized_pnl_sol:.4f} SOL"
+        )
         try:
             self.alerts.send_message(
                 "\n".join(
                     [
                         f"Live {order.side} confirmed",
-                        f"Token: {order.token_address}",
+                        f"Token: {label}",
+                        f"CA: {short_token_address(order.token_address)}",
                         f"Reason: {order.reason}",
+                        size_line,
+                        f"Entry MC: {format_usd(position.entry_market_cap_usd)}",
+                        f"Target MC: {format_usd(position.target_market_cap_usd)}",
                         f"Signature: {order.transaction_signature}",
                         f"Position: {position.status}",
                     ]
@@ -270,3 +291,45 @@ class LiveOrderExecutor:
             )
         except Exception:
             logger.exception("Failed to send live trade Telegram alert")
+
+    def _send_failure_alert(
+        self,
+        session: Session,
+        order: LiveOrder,
+        position: LivePosition,
+        error: str,
+    ) -> None:
+        symbol, name = self._latest_token_identity(session, position.token_address)
+        label = format_token_label(position.token_address, symbol=symbol, name=name)
+        trimmed_error = error if len(error) <= 450 else f"{error[:450]}..."
+        try:
+            self.alerts.send_message(
+                "\n".join(
+                    [
+                        f"Live {order.side} failed",
+                        f"Token: {label}",
+                        f"CA: {short_token_address(order.token_address)}",
+                        f"Reason: {order.reason}",
+                        f"Order: #{order.id}",
+                        f"Position: {position.status}",
+                        f"Error: {trimmed_error}",
+                    ]
+                )
+            )
+        except Exception:
+            logger.exception("Failed to send live trade failure Telegram alert")
+
+    @staticmethod
+    def _latest_token_identity(
+        session: Session,
+        token_address: str,
+    ) -> tuple[str | None, str | None]:
+        snapshot = session.scalars(
+            select(TokenMarketSnapshot)
+            .where(TokenMarketSnapshot.token_address == token_address)
+            .order_by(TokenMarketSnapshot.snapshot_time.desc(), TokenMarketSnapshot.id.desc())
+            .limit(1)
+        ).first()
+        if snapshot is None:
+            return None, None
+        return snapshot.symbol, snapshot.name
