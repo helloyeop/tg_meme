@@ -9,6 +9,7 @@ from alerts.bot import TelegramAlertBot, format_token_label, format_usd, short_t
 from app.settings import get_settings
 from data_sources.types import TokenMarketData
 from db.models import LiveOrder, LivePosition, TokenCallEvent, TokenMarketSnapshot
+from live.control import live_entry_paused
 
 LAMPORTS_PER_SOL = 1_000_000_000
 logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ class LiveTradingEngine:
         now = now or datetime.utcnow()
         if not self.settings.live_order_staging_enabled:
             return LiveDecision(False, "live_order_staging_disabled")
+        if live_entry_paused(session):
+            return LiveDecision(False, "live_entry_paused")
         if not paper_opened:
             return LiveDecision(False, "paper_entry_not_opened")
         if market_data is None or market_data.market_cap_usd is None:

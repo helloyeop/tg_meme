@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from data_sources.types import TokenMarketData
 from db.models import Base, LiveOrder, LivePosition, TokenCallEvent, TokenMarketSnapshot
+from live.control import set_live_entry_paused
 from live.engine import LiveTradingEngine
 from live.execution import JupiterSwapClient, LiveExecutionDisabled, LiveOrderExecutor
 
@@ -71,6 +72,35 @@ def test_live_entry_staging_is_separate_from_paper_position() -> None:
     assert decision.position.target_profit_pct == 30
     assert decision.position.target_market_cap_usd == pytest.approx(130000)
     assert session.scalar(select(LiveOrder)).side == "BUY"
+
+
+def test_live_entry_refuses_when_paused_by_control_bot() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    set_live_entry_paused(session, True, "test")
+    session.flush()
+
+    decision = LiveTradingEngine(live_strategy(), live_settings()).maybe_stage_entry(
+        session,
+        event=event,
+        market_data=TokenMarketData(
+            source="test",
+            token_address="mint",
+            market_cap_usd=100000,
+        ),
+        paper_opened=True,
+    )
+
+    assert decision.staged is False
+    assert decision.reason == "live_entry_paused"
 
 
 def test_live_entry_staging_sends_token_identity_alert() -> None:

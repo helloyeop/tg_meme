@@ -58,3 +58,16 @@ services:
     volumes:
       - ./wallet-secrets:/run/wallet-secrets:ro
       - ./signer-data:/app/signer-data
+
+  live-control-bot:
+    build: .
+    env_file: .env
+    command: ["python", "-m", "app.main", "--mode", "live-control-bot"]
+    restart: unless-stopped
+    profiles: ["live"]
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      init-db:
+        condition: service_completed_successfully

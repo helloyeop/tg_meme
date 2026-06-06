@@ -432,6 +432,14 @@ class LiveOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 
+class LiveControlState(TimestampMixin, Base):
+    __tablename__ = "live_control_state"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
 class LiveQuoteAudit(Base):
     __tablename__ = "live_quote_audits"
     __table_args__ = (Index("idx_live_quote_audits_token_time", "token_address", "created_at"),)

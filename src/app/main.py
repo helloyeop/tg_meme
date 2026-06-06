@@ -21,6 +21,7 @@ def main() -> None:
             "position-refresh",
             "live-position-refresh",
             "live-order-execute",
+            "live-control-bot",
             "closed-position-refresh",
             "all",
         ],
@@ -45,6 +46,11 @@ def main() -> None:
 
         count = asyncio.run(TelegramCollector().collect_history_once(limit_per_channel=args.limit))
         print(f"Collected {count} historical messages.")
+        return
+    if args.mode == "live-control-bot":
+        from live.control_bot import run_live_control_bot
+
+        run_live_control_bot()
         return
 
     pipeline = MessagePipeline()
@@ -72,7 +78,6 @@ def main() -> None:
         count = pipeline.execute_live_orders()
         print(f"Executed {count} live orders.")
         return
-
     while True:
         pipeline.process_unanalyzed_messages(limit=args.limit)
         pipeline.refresh_open_events(limit=args.limit)
