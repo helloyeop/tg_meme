@@ -3,7 +3,7 @@ import logging
 from data_sources.dexscreener import DexScreenerClient
 from data_sources.gmgn import GMGNClient
 from data_sources.helius import HeliusClient
-from data_sources.types import TokenMarketData, TokenSecurityData
+from data_sources.types import TokenMarketData, TokenSecurityData, TokenWalletFlowData
 
 logger = logging.getLogger(__name__)
 
@@ -44,4 +44,11 @@ class DataSourceAggregator:
             return self.helius.get_token_security_data(token_address)
         except Exception as exc:
             logger.warning("helius security data failed for %s: %s", token_address, exc)
+            return None
+
+    def get_wallet_flow_data(self, token_address: str) -> TokenWalletFlowData | None:
+        try:
+            return self.gmgn.get_token_wallet_flow_data(token_address)
+        except Exception as exc:
+            logger.warning("gmgn wallet flow data failed for %s: %s", token_address, exc)
             return None

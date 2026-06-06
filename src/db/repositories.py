@@ -15,6 +15,7 @@ from db.models import (
     TelegramMessage,
     TokenMarketSnapshot,
     TokenSecuritySnapshot,
+    TokenWalletFlowSnapshot,
 )
 
 
@@ -235,6 +236,37 @@ def store_security_snapshot(session: Session, security_data) -> TokenSecuritySna
         freeze_authority_active=security_data.freeze_authority_active,
         liquidity_locked=security_data.liquidity_locked,
         risk_flags_json=json.dumps(security_data.risk_flags, ensure_ascii=False),
+        raw_json=raw_json,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def store_wallet_flow_snapshot(session: Session, wallet_flow_data) -> TokenWalletFlowSnapshot:
+    raw_json = (
+        json.dumps(wallet_flow_data.raw, ensure_ascii=False)
+        if get_settings().store_security_snapshot_raw_json
+        else None
+    )
+    row = TokenWalletFlowSnapshot(
+        token_address=wallet_flow_data.token_address,
+        source=wallet_flow_data.source,
+        snapshot_time=datetime.utcnow(),
+        smart_trader_count=wallet_flow_data.smart_trader_count,
+        smart_net_buy_usd=wallet_flow_data.smart_net_buy_usd,
+        smart_buy_volume_usd=wallet_flow_data.smart_buy_volume_usd,
+        smart_sell_volume_usd=wallet_flow_data.smart_sell_volume_usd,
+        smart_recent_buy_count=wallet_flow_data.smart_recent_buy_count,
+        smart_recent_sell_count=wallet_flow_data.smart_recent_sell_count,
+        kol_trader_count=wallet_flow_data.kol_trader_count,
+        kol_net_buy_usd=wallet_flow_data.kol_net_buy_usd,
+        kol_buy_volume_usd=wallet_flow_data.kol_buy_volume_usd,
+        kol_sell_volume_usd=wallet_flow_data.kol_sell_volume_usd,
+        kol_recent_buy_count=wallet_flow_data.kol_recent_buy_count,
+        kol_recent_sell_count=wallet_flow_data.kol_recent_sell_count,
+        top_trader_sell_pressure_usd=wallet_flow_data.top_trader_sell_pressure_usd,
+        confidence_score=wallet_flow_data.confidence_score,
         raw_json=raw_json,
     )
     session.add(row)

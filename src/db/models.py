@@ -264,6 +264,32 @@ class WalletActivitySnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 
+class TokenWalletFlowSnapshot(Base):
+    __tablename__ = "token_wallet_flow_snapshots"
+    __table_args__ = (Index("idx_wallet_flow_token_time", "token_address", "snapshot_time"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_address: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    snapshot_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    smart_trader_count: Mapped[int] = mapped_column(Integer, default=0)
+    smart_net_buy_usd: Mapped[float | None] = mapped_column(Float)
+    smart_buy_volume_usd: Mapped[float | None] = mapped_column(Float)
+    smart_sell_volume_usd: Mapped[float | None] = mapped_column(Float)
+    smart_recent_buy_count: Mapped[int] = mapped_column(Integer, default=0)
+    smart_recent_sell_count: Mapped[int] = mapped_column(Integer, default=0)
+    kol_trader_count: Mapped[int] = mapped_column(Integer, default=0)
+    kol_net_buy_usd: Mapped[float | None] = mapped_column(Float)
+    kol_buy_volume_usd: Mapped[float | None] = mapped_column(Float)
+    kol_sell_volume_usd: Mapped[float | None] = mapped_column(Float)
+    kol_recent_buy_count: Mapped[int] = mapped_column(Integer, default=0)
+    kol_recent_sell_count: Mapped[int] = mapped_column(Integer, default=0)
+    top_trader_sell_pressure_usd: Mapped[float | None] = mapped_column(Float)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0)
+    raw_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+
+
 class EventScore(Base):
     __tablename__ = "event_scores"
     __table_args__ = (Index("idx_scores_event_time", "event_id", "score_time"),)

@@ -35,7 +35,7 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
             "enabled": True,
             "allow_missing_activity_data": True,
             "allow_missing_security_data": True,
-            "require_buy_pressure": True,
+            "require_buy_pressure": False,
             "min_buy_sell_ratio": 1.1,
             "min_buys_5m": 1,
             "min_makers_5m": 5,
@@ -44,6 +44,19 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
             "block_mint_authority_active": True,
             "block_freeze_authority_active": True,
             "block_risk_flags": True,
+        },
+        "smart_money_confirmation": {
+            "enabled": True,
+            "allow_missing_wallet_flow_data": True,
+            "min_confidence_score": 35,
+            "min_smart_trader_count": 1,
+            "min_smart_net_buy_usd": 0,
+            "min_recent_smart_buy_count": 0,
+            "allow_kol_as_support": True,
+            "min_kol_trader_count": 1,
+            "min_kol_net_buy_usd": 0,
+            "block_on_smart_recent_sell_count": 2,
+            "block_on_negative_smart_net_buy": True,
         },
     }
     assert strategy["actionable_recall"]["min_minutes_since_previous_actionable"] == 60

@@ -25,6 +25,7 @@ from db.repositories import (
     store_message_analysis,
     store_paper_entry_decision,
     store_security_snapshot,
+    store_wallet_flow_snapshot,
 )
 from db.session import SessionLocal
 from events.context import ContextResolution, MessageContextResolver
@@ -469,6 +470,7 @@ class MessagePipeline:
                     setup=setup,
                     market_data=market_data,
                     confirmation_config=setup_config.get("gmgn_confirmation", {}),
+                    smart_money_config=setup_config.get("smart_money_confirmation", {}),
                 )
                 if not confirmed:
                     setup.decision_reason = reason
@@ -512,7 +514,16 @@ class MessagePipeline:
         setup: LiveEntrySetup,
         market_data: TokenMarketData,
         confirmation_config: dict,
+        smart_money_config: dict,
     ) -> tuple[bool, bool, str]:
+        smart_money_result = self._confirm_smart_money_flow(
+            session,
+            setup=setup,
+            confirmation_config=smart_money_config,
+        )
+        if smart_money_result is not None:
+            return smart_money_result
+
         if not confirmation_config.get("enabled", False):
             return True, False, "gmgn_confirmation_disabled"
 
@@ -536,6 +547,105 @@ class MessagePipeline:
         return self._check_gmgn_security_confirmation(
             security_data,
             confirmation_config,
+        )
+
+    def _confirm_smart_money_flow(
+        self,
+        session,
+        *,
+        setup: LiveEntrySetup,
+        confirmation_config: dict,
+    ) -> tuple[bool, bool, str] | None:
+        if not confirmation_config.get("enabled", False):
+            return None
+        wallet_flow_data = self._get_wallet_flow_data(setup.token_address)
+        if wallet_flow_data is None:
+            if confirmation_config.get("allow_missing_wallet_flow_data", True):
+                return None
+            return False, False, "smart_money_missing_wallet_flow_data"
+        store_wallet_flow_snapshot(session, wallet_flow_data)
+        return self._check_smart_money_confirmation(
+            wallet_flow_data,
+            confirmation_config,
+        )
+
+    def _get_wallet_flow_data(self, token_address: str):
+        if not hasattr(self.data_sources, "get_wallet_flow_data"):
+            return None
+        try:
+            return self.data_sources.get_wallet_flow_data(token_address)
+        except Exception as exc:
+            logger.warning("wallet flow confirmation failed for %s: %s", token_address, exc)
+            return None
+
+    @staticmethod
+    def _check_smart_money_confirmation(
+        wallet_flow_data,
+        confirmation_config: dict,
+    ) -> tuple[bool, bool, str]:
+        block_sell_count = confirmation_config.get("block_on_smart_recent_sell_count")
+        if (
+            block_sell_count is not None
+            and wallet_flow_data.smart_recent_sell_count >= int(block_sell_count)
+        ):
+            return (
+                False,
+                True,
+                f"smart_money_recent_sells:{wallet_flow_data.smart_recent_sell_count}",
+            )
+        if (
+            confirmation_config.get("block_on_negative_smart_net_buy", True)
+            and wallet_flow_data.smart_net_buy_usd is not None
+            and wallet_flow_data.smart_net_buy_usd < 0
+        ):
+            return (
+                False,
+                True,
+                f"smart_money_net_selling:{wallet_flow_data.smart_net_buy_usd:.0f}",
+            )
+
+        min_score = float(confirmation_config.get("min_confidence_score", 35))
+        if wallet_flow_data.confidence_score >= min_score:
+            return True, False, f"smart_money_confirmed:{wallet_flow_data.confidence_score:.1f}"
+
+        min_smart_count = int(confirmation_config.get("min_smart_trader_count", 1))
+        min_smart_net = float(confirmation_config.get("min_smart_net_buy_usd", 0))
+        smart_net = wallet_flow_data.smart_net_buy_usd or 0
+        smart_pass = (
+            wallet_flow_data.smart_trader_count >= min_smart_count
+            and smart_net >= min_smart_net
+        )
+        min_recent_smart_buys = int(confirmation_config.get("min_recent_smart_buy_count", 0))
+        if min_recent_smart_buys > 0:
+            smart_pass = (
+                smart_pass
+                and wallet_flow_data.smart_recent_buy_count >= min_recent_smart_buys
+            )
+        if smart_pass:
+            return True, False, "smart_money_confirmed_by_traders"
+
+        if confirmation_config.get("allow_kol_as_support", True):
+            min_kol_count = int(confirmation_config.get("min_kol_trader_count", 1))
+            min_kol_net = float(confirmation_config.get("min_kol_net_buy_usd", 0))
+            kol_net = wallet_flow_data.kol_net_buy_usd or 0
+            if (
+                wallet_flow_data.kol_trader_count >= min_kol_count
+                and kol_net >= min_kol_net
+                and wallet_flow_data.smart_recent_sell_count == 0
+            ):
+                return True, False, "kol_flow_confirmed_no_smart_sell"
+
+        return (
+            False,
+            False,
+            (
+                "smart_money_not_confirmed:"
+                f"score={wallet_flow_data.confidence_score:.1f},"
+                f"smart={wallet_flow_data.smart_trader_count},"
+                f"smart_net={smart_net:.0f},"
+                f"kol={wallet_flow_data.kol_trader_count},"
+                f"kol_net={(wallet_flow_data.kol_net_buy_usd or 0):.0f}"
+            ),
         )
 
     def _get_gmgn_confirmation_market_data(

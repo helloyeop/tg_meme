@@ -32,7 +32,7 @@ live:
       enabled: true
       allow_missing_activity_data: true
       allow_missing_security_data: true
-      require_buy_pressure: true
+      require_buy_pressure: false
       min_buy_sell_ratio: 1.1
       min_buys_5m: 1
       min_makers_5m: 5
@@ -41,6 +41,18 @@ live:
       block_mint_authority_active: true
       block_freeze_authority_active: true
       block_risk_flags: true
+    smart_money_confirmation:
+      enabled: true
+      allow_missing_wallet_flow_data: true
+      min_confidence_score: 35
+      min_smart_trader_count: 1
+      min_smart_net_buy_usd: 0
+      min_recent_smart_buy_count: 0
+      allow_kol_as_support: true
+      min_kol_trader_count: 1
+      min_kol_net_buy_usd: 0
+      block_on_smart_recent_sell_count: 2
+      block_on_negative_smart_net_buy: true
 
 entry:
   final_signal_score_min: 5
