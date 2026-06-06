@@ -2,6 +2,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.settings import get_settings
@@ -47,7 +48,11 @@ def get_session() -> Session:
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except OperationalError as exc:
+        if "already exists" not in str(exc):
+            raise
     _migrate_market_cap_columns()
 
 
