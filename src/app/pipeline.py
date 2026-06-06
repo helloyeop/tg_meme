@@ -428,7 +428,6 @@ class MessagePipeline:
             market_by_token = self.data_sources.dexscreener.get_tokens_market_data(
                 token_addresses
             )
-            reclaim_pct = float(setup_config.get("reclaim_pct", 8))
             for setup in setups:
                 market_data = market_by_token.get(setup.token_address)
                 if setup.expires_at < now:
@@ -447,16 +446,13 @@ class MessagePipeline:
                 ):
                     setup.low_market_cap_usd = current_market_cap
                     setup.low_time = now
-                    setup.reclaim_market_cap_usd = current_market_cap * (
-                        1 + reclaim_pct / 100
-                    )
+                    if self._setup_requires_reclaim(setup):
+                        reclaim_pct = self._reclaim_pct_for_setup(setup_config, setup)
+                        setup.reclaim_market_cap_usd = current_market_cap * (
+                            1 + reclaim_pct / 100
+                        )
 
-                dip_reached = setup.low_market_cap_usd <= setup.trigger_market_cap_usd
-                reclaim_reached = (
-                    setup.reclaim_market_cap_usd is not None
-                    and current_market_cap >= setup.reclaim_market_cap_usd
-                )
-                if not (dip_reached and reclaim_reached):
+                if not self._live_entry_setup_ready(setup, current_market_cap):
                     refreshed += 1
                     continue
 
@@ -506,6 +502,38 @@ class MessagePipeline:
                 refreshed += 1
             session.commit()
         return refreshed
+
+    @staticmethod
+    def _setup_requires_reclaim(setup: LiveEntrySetup) -> bool:
+        return setup.setup_type != "established_pullback_bid"
+
+    @staticmethod
+    def _reclaim_pct_for_setup(setup_config: dict, setup: LiveEntrySetup) -> float:
+        if setup.setup_type == "fresh_momentum_reclaim":
+            return float(
+                setup_config.get("fresh_momentum", {}).get(
+                    "reclaim_pct",
+                    setup_config.get("reclaim_pct", 8),
+                )
+            )
+        return float(setup_config.get("reclaim_pct", 8))
+
+    def _live_entry_setup_ready(
+        self,
+        setup: LiveEntrySetup,
+        current_market_cap: float,
+    ) -> bool:
+        dip_reached = (
+            setup.low_market_cap_usd is not None
+            and setup.low_market_cap_usd <= setup.trigger_market_cap_usd
+        )
+        if setup.setup_type == "established_pullback_bid":
+            return current_market_cap <= setup.trigger_market_cap_usd
+        reclaim_reached = (
+            setup.reclaim_market_cap_usd is not None
+            and current_market_cap >= setup.reclaim_market_cap_usd
+        )
+        return dip_reached and reclaim_reached
 
     def _confirm_live_entry_setup(
         self,
@@ -797,15 +825,26 @@ class MessagePipeline:
         if existing is not None:
             return existing
         now = datetime.utcnow()
-        observation_seconds = int(setup_config.get("observation_seconds", 600))
-        pullback_pct = float(setup_config.get("pullback_pct", -20))
+        setup_type, typed_config = self._live_entry_setup_type(
+            market_data.market_cap_usd,
+            setup_config,
+        )
+        observation_seconds = int(
+            typed_config.get(
+                "observation_seconds",
+                setup_config.get("observation_seconds", 600),
+            )
+        )
+        pullback_pct = float(
+            typed_config.get("pullback_pct", setup_config.get("pullback_pct", -20))
+        )
         trigger_market_cap = market_data.market_cap_usd * (1 + pullback_pct / 100)
         setup = LiveEntrySetup(
             event_id=event.id,
             channel_id=event.channel_id,
             token_address=event.token_address,
             status="WATCHING",
-            setup_type="pullback_reclaim",
+            setup_type=setup_type,
             call_time=event.latest_actionable_call_time
             or event.first_actionable_call_time
             or event.first_seen_time,
@@ -819,6 +858,21 @@ class MessagePipeline:
         session.add(setup)
         session.flush()
         return setup
+
+    @staticmethod
+    def _live_entry_setup_type(
+        market_cap_usd: float,
+        setup_config: dict,
+    ) -> tuple[str, dict]:
+        established_config = setup_config.get("established_pullback", {})
+        if (
+            established_config.get("enabled", False)
+            and market_cap_usd >= float(established_config.get("min_market_cap_usd", 1_000_000))
+        ):
+            return "established_pullback_bid", established_config
+
+        fresh_config = setup_config.get("fresh_momentum", {})
+        return "fresh_momentum_reclaim", fresh_config
 
     def _entry_round_trip_recovery_pct(
         self,

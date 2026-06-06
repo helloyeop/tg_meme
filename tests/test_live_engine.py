@@ -36,6 +36,12 @@ def live_strategy():
                 "at_or_above_1m_pct": 10,
             },
             "stop_loss_pct": -70,
+            "stop_loss_by_entry_market_cap": {
+                "below_500k_pct": -35,
+                "from_500k_to_below_1m_pct": -30,
+                "from_1m_to_below_5m_pct": -25,
+                "at_or_above_5m_pct": -20,
+            },
             "daily_max_loss_sol": 1,
             "max_open_positions": 1,
             "max_entry_size_sol": 0.05,
@@ -71,7 +77,37 @@ def test_live_entry_staging_is_separate_from_paper_position() -> None:
     assert decision.position.status == "ENTRY_REQUESTED"
     assert decision.position.target_profit_pct == 30
     assert decision.position.target_market_cap_usd == pytest.approx(130000)
+    assert decision.position.stop_loss_pct == -35
+    assert decision.position.stop_loss_market_cap_usd == pytest.approx(65000)
     assert session.scalar(select(LiveOrder)).side == "BUY"
+
+
+def test_live_entry_uses_market_cap_tiered_stop_loss() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=datetime.utcnow(),
+    )
+    session.add(event)
+    session.flush()
+
+    decision = LiveTradingEngine(live_strategy(), live_settings()).maybe_stage_entry(
+        session,
+        event=event,
+        market_data=TokenMarketData(
+            source="test",
+            token_address="mint",
+            market_cap_usd=2_000_000,
+        ),
+        paper_opened=True,
+    )
+
+    assert decision.staged is True
+    assert decision.position.stop_loss_pct == -25
+    assert decision.position.stop_loss_market_cap_usd == pytest.approx(1_500_000)
 
 
 def test_live_entry_refuses_when_paused_by_control_bot() -> None:

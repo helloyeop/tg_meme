@@ -23,6 +23,12 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
     assert strategy["live"]["min_entry_round_trip_recovery_pct"] == 90
     assert strategy["live"]["take_profit_retry_seconds"] == 30
     assert strategy["live"]["stop_loss_pct"] == -70
+    assert strategy["live"]["stop_loss_by_entry_market_cap"] == {
+        "below_500k_pct": -35,
+        "from_500k_to_below_1m_pct": -30,
+        "from_1m_to_below_5m_pct": -25,
+        "at_or_above_5m_pct": -20,
+    }
     assert strategy["live"]["daily_max_loss_sol"] == 1
     assert strategy["live"]["daily_max_buy_sol"] == 1
     assert strategy["live"]["entry_setup"] == {
@@ -31,6 +37,19 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
         "pullback_pct": -20,
         "reclaim_pct": 8,
         "expire_without_entry": True,
+        "fresh_momentum": {
+            "max_market_cap_usd": 1000000,
+            "observation_seconds": 600,
+            "pullback_pct": -20,
+            "reclaim_pct": 8,
+        },
+        "established_pullback": {
+            "enabled": True,
+            "min_market_cap_usd": 1000000,
+            "observation_seconds": 86400,
+            "pullback_pct": -20,
+            "require_reclaim": False,
+        },
         "gmgn_confirmation": {
             "enabled": True,
             "allow_missing_activity_data": True,

@@ -73,7 +73,7 @@ class LiveTradingEngine:
                 return LiveDecision(False, "live_entry_round_trip_recovery_too_low")
 
         take_profit_pct = self._take_profit_pct(market_data.market_cap_usd)
-        stop_loss_pct = self.live.get("stop_loss_pct", -70)
+        stop_loss_pct = self._stop_loss_pct(market_data.market_cap_usd)
         target_market_cap = market_data.market_cap_usd * (1 + take_profit_pct / 100)
         stop_loss_market_cap = market_data.market_cap_usd * (1 + stop_loss_pct / 100)
         position = LivePosition(
@@ -238,6 +238,17 @@ class LiveTradingEngine:
         if entry_market_cap_usd < 1_000_000:
             return tiers.get("from_500k_to_below_1m_pct", default)
         return tiers.get("at_or_above_1m_pct", default)
+
+    def _stop_loss_pct(self, entry_market_cap_usd: float) -> float:
+        default = self.live.get("stop_loss_pct", -70)
+        tiers = self.live.get("stop_loss_by_entry_market_cap", {})
+        if entry_market_cap_usd < 500_000:
+            return tiers.get("below_500k_pct", default)
+        if entry_market_cap_usd < 1_000_000:
+            return tiers.get("from_500k_to_below_1m_pct", default)
+        if entry_market_cap_usd < 5_000_000:
+            return tiers.get("from_1m_to_below_5m_pct", default)
+        return tiers.get("at_or_above_5m_pct", default)
 
     def _quoted_return_pct(
         self,

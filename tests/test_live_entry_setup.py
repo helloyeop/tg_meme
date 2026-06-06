@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -33,6 +34,12 @@ def live_strategy():
                 "at_or_above_1m_pct": 10,
             },
             "stop_loss_pct": -70,
+            "stop_loss_by_entry_market_cap": {
+                "below_500k_pct": -35,
+                "from_500k_to_below_1m_pct": -30,
+                "from_1m_to_below_5m_pct": -25,
+                "at_or_above_5m_pct": -20,
+            },
             "daily_max_loss_sol": 1,
             "max_open_positions": 3,
             "max_entry_size_sol": 0.5,
@@ -42,6 +49,19 @@ def live_strategy():
                 "observation_seconds": 600,
                 "pullback_pct": -20,
                 "reclaim_pct": 8,
+                "fresh_momentum": {
+                    "max_market_cap_usd": 1_000_000,
+                    "observation_seconds": 600,
+                    "pullback_pct": -20,
+                    "reclaim_pct": 8,
+                },
+                "established_pullback": {
+                    "enabled": True,
+                    "min_market_cap_usd": 1_000_000,
+                    "observation_seconds": 86_400,
+                    "pullback_pct": -20,
+                    "require_reclaim": False,
+                },
                 "gmgn_confirmation": {
                     "enabled": True,
                     "allow_missing_activity_data": True,
@@ -112,8 +132,45 @@ def test_live_entry_setup_replaces_immediate_live_entry(monkeypatch) -> None:
 
     assert setup is not None
     assert setup.status == "WATCHING"
+    assert setup.setup_type == "fresh_momentum_reclaim"
     assert setup.trigger_market_cap_usd == 80_000
     assert session.scalar(select(LiveOrder)) is None
+
+
+def test_live_entry_setup_uses_long_pullback_bid_for_established_tokens(
+    monkeypatch,
+) -> None:
+    _, session = make_session(monkeypatch)
+    now = datetime.utcnow()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=now,
+        first_actionable_call_time=now,
+    )
+    session.add(event)
+    session.flush()
+    pipeline = MessagePipeline()
+    pipeline.live.strategy = live_strategy()
+    pipeline.live.live = live_strategy()["live"]
+    monkeypatch.setattr("app.pipeline.get_settings", live_settings)
+
+    setup = pipeline._stage_live_entry_setup(
+        session,
+        event=event,
+        market_data=TokenMarketData(
+            source="test",
+            token_address="mint",
+            market_cap_usd=2_000_000,
+        ),
+        paper_opened=True,
+        decision_reason="opened",
+    )
+
+    assert setup is not None
+    assert setup.setup_type == "established_pullback_bid"
+    assert setup.trigger_market_cap_usd == 1_600_000
+    assert (setup.expires_at - now).total_seconds() == pytest.approx(86_400, abs=2)
 
 
 def test_live_entry_setup_enters_after_pullback_reclaim(monkeypatch) -> None:
@@ -157,6 +214,65 @@ def test_live_entry_setup_enters_after_pullback_reclaim(monkeypatch) -> None:
                     source="dexscreener_fast",
                     token_address="mint",
                     market_cap_usd=86_000,
+                )
+            }
+        )
+    )
+
+    count = pipeline.refresh_live_entry_setups(force=True)
+
+    verify_session = session_factory()
+    setup = verify_session.scalar(select(LiveEntrySetup))
+    order = verify_session.scalar(select(LiveOrder))
+    assert count == 1
+    assert setup.status == "ENTERED"
+    assert order is not None
+    assert order.side == "BUY"
+
+
+def test_established_pullback_setup_enters_on_pullback_without_reclaim(
+    monkeypatch,
+) -> None:
+    session_factory, session = make_session(monkeypatch)
+    now = datetime.utcnow()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=now,
+        first_actionable_call_time=now,
+    )
+    session.add(event)
+    session.flush()
+    session.add(
+        LiveEntrySetup(
+            event_id=event.id,
+            channel_id="channel",
+            token_address="mint",
+            status="WATCHING",
+            setup_type="established_pullback_bid",
+            call_time=now,
+            call_market_cap_usd=2_000_000,
+            trigger_market_cap_usd=1_600_000,
+            low_market_cap_usd=1_900_000,
+            low_time=now,
+            reclaim_market_cap_usd=None,
+            expires_at=now + timedelta(hours=24),
+        )
+    )
+    session.commit()
+
+    monkeypatch.setattr("app.pipeline.get_settings", live_settings)
+    pipeline = MessagePipeline()
+    pipeline.live.strategy = live_strategy()
+    pipeline.live.live = live_strategy()["live"]
+    pipeline.live.settings = live_settings()
+    pipeline.data_sources = SimpleNamespace(
+        dexscreener=SimpleNamespace(
+            get_tokens_market_data=lambda _: {
+                "mint": TokenMarketData(
+                    source="dexscreener_fast",
+                    token_address="mint",
+                    market_cap_usd=1_590_000,
                 )
             }
         )

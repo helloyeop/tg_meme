@@ -18,6 +18,11 @@ live:
   min_entry_round_trip_recovery_pct: 90
   take_profit_retry_seconds: 30
   stop_loss_pct: -70
+  stop_loss_by_entry_market_cap:
+    below_500k_pct: -35
+    from_500k_to_below_1m_pct: -30
+    from_1m_to_below_5m_pct: -25
+    at_or_above_5m_pct: -20
   daily_max_loss_sol: 1
   daily_max_buy_sol: 1
   max_open_positions: 3
@@ -28,6 +33,17 @@ live:
     pullback_pct: -20
     reclaim_pct: 8
     expire_without_entry: true
+    fresh_momentum:
+      max_market_cap_usd: 1000000
+      observation_seconds: 600
+      pullback_pct: -20
+      reclaim_pct: 8
+    established_pullback:
+      enabled: true
+      min_market_cap_usd: 1000000
+      observation_seconds: 86400
+      pullback_pct: -20
+      require_reclaim: false
     gmgn_confirmation:
       enabled: true
       allow_missing_activity_data: true
