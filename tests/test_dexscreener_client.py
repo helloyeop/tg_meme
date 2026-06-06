@@ -71,3 +71,42 @@ def test_batch_market_data_rejects_more_than_documented_token_limit() -> None:
         assert "up to 30" in str(exc)
     else:
         raise AssertionError("Expected the documented 30-token maximum to be enforced")
+
+
+def test_resolves_dexscreener_pair_identifier_to_base_token(monkeypatch) -> None:
+    requested_urls: list[str] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "pair": {
+                    "chainId": "solana",
+                    "pairAddress": "pair",
+                    "baseToken": {"address": "token", "symbol": "MEME"},
+                    "quoteToken": {"address": "So11111111111111111111111111111111111111112"},
+                }
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            assert timeout == 5
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, url: str) -> FakeResponse:
+            requested_urls.append(url)
+            return FakeResponse()
+
+    monkeypatch.setattr("data_sources.dexscreener.httpx.Client", FakeClient)
+    DexScreenerClient._request_times.clear()
+    client = DexScreenerClient(base_url="https://api.dexscreener.com")
+
+    assert client.resolve_solana_pair_identifier("pair") == "token"
+    assert requested_urls == ["https://api.dexscreener.com/latest/dex/pairs/solana/pair"]

@@ -34,7 +34,10 @@ from live.execution import LAMPORTS_PER_SOL, LiveOrderExecutor
 from llm.classifier import LLMClassifier, MessageClassification
 from paper.engine import PaperTradingEngine
 from scoring.engine import ScoringEngine
-from telegram.ca_extractor import extract_solana_addresses
+from telegram.ca_extractor import (
+    extract_dexscreener_solana_identifiers,
+    extract_solana_addresses,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +93,7 @@ class MessagePipeline:
             for message in messages:
                 message_id = message.id
                 try:
-                    addresses = extract_solana_addresses(message.raw_text)
+                    addresses = self._extract_message_addresses(message.raw_text)
                     store_extracted_addresses(
                         session, message_db_id=message.id, addresses=addresses
                     )
@@ -201,6 +204,22 @@ class MessagePipeline:
                     session.commit()
                     logger.exception("Failed to process message %s", message_id)
         return processed
+
+    def _extract_message_addresses(self, text: str | None) -> list[str]:
+        addresses = extract_solana_addresses(text)
+        seen = set(addresses)
+        for identifier in extract_dexscreener_solana_identifiers(text):
+            try:
+                resolved = self.data_sources.dexscreener.resolve_solana_pair_identifier(
+                    identifier
+                )
+            except Exception as exc:
+                logger.warning("DexScreener URL resolution failed for %s: %s", identifier, exc)
+                continue
+            if resolved and resolved not in seen:
+                seen.add(resolved)
+                addresses.append(resolved)
+        return addresses
 
     def refresh_open_events(self, limit: int = 5, force: bool = False) -> int:
         refreshed = 0

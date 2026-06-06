@@ -1,11 +1,17 @@
 import re
 from collections.abc import Iterable
 
-
 BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 BASE58_INDEX = {char: index for index, char in enumerate(BASE58_ALPHABET)}
-SOLANA_ADDRESS_RE = re.compile(rf"(?<![{BASE58_ALPHABET}])([{BASE58_ALPHABET}]{{32,44}})(?![{BASE58_ALPHABET}])")
+SOLANA_ADDRESS_RE = re.compile(
+    rf"(?<![{BASE58_ALPHABET}])([{BASE58_ALPHABET}]{{32,44}})(?![{BASE58_ALPHABET}])"
+)
 EVM_ADDRESS_RE = re.compile(r"\b0x[a-fA-F0-9]{40}\b")
+DEXSCREENER_SOLANA_URL_RE = re.compile(
+    rf"https?://(?:www\.)?dexscreener\.com/solana/([{BASE58_ALPHABET}]{{32,44}})"
+    r"(?:[/?#][^\s]*)?",
+    re.IGNORECASE,
+)
 
 
 def is_valid_solana_address(value: str) -> bool:
@@ -40,12 +46,13 @@ def extract_solana_addresses(text: str | None) -> list[str]:
         return []
 
     evm_spans = list(_spans(EVM_ADDRESS_RE.finditer(text)))
+    dexscreener_spans = list(_spans(DEXSCREENER_SOLANA_URL_RE.finditer(text)))
     addresses: list[str] = []
     seen: set[str] = set()
 
     for match in SOLANA_ADDRESS_RE.finditer(text):
         candidate = match.group(1)
-        if _inside_spans(match.start(), match.end(), evm_spans):
+        if _inside_spans(match.start(), match.end(), evm_spans + dexscreener_spans):
             continue
         if not is_valid_solana_address(candidate):
             continue
@@ -55,6 +62,21 @@ def extract_solana_addresses(text: str | None) -> list[str]:
         addresses.append(candidate)
 
     return addresses
+
+
+def extract_dexscreener_solana_identifiers(text: str | None) -> list[str]:
+    if not text:
+        return []
+
+    identifiers: list[str] = []
+    seen: set[str] = set()
+    for match in DEXSCREENER_SOLANA_URL_RE.finditer(text):
+        identifier = match.group(1)
+        if identifier in seen:
+            continue
+        seen.add(identifier)
+        identifiers.append(identifier)
+    return identifiers
 
 
 def _spans(matches: Iterable[re.Match[str]]) -> list[tuple[int, int]]:

@@ -21,6 +21,18 @@ class DexScreenerClient:
         return self.get_tokens_market_data([token_address]).get(token_address)
 
     @simple_retry(attempts=2, initial_delay=0.25)
+    def resolve_solana_pair_identifier(self, identifier: str) -> str | None:
+        self._wait_for_request_budget()
+        with httpx.Client(timeout=5) as client:
+            response = client.get(f"{self.base_url}/latest/dex/pairs/solana/{identifier}")
+            response.raise_for_status()
+            raw = response.json() or {}
+        pair = _first_pair(raw)
+        if not pair or pair.get("chainId") != "solana":
+            return None
+        return _primary_token_address(pair)
+
+    @simple_retry(attempts=2, initial_delay=0.25)
     def get_tokens_market_data(self, token_addresses: list[str]) -> dict[str, TokenMarketData]:
         unique_addresses = list(dict.fromkeys(token_addresses))
         if not unique_addresses:
@@ -40,7 +52,10 @@ class DexScreenerClient:
                 if pair.get("chainId") == "solana" and _contains_token(pair, token_address)
             ]
             if token_pairs:
-                pair = max(token_pairs, key=lambda item: ((item.get("liquidity") or {}).get("usd") or 0))
+                pair = max(
+                    token_pairs,
+                    key=lambda item: ((item.get("liquidity") or {}).get("usd") or 0),
+                )
                 result[token_address] = _to_market_data(token_address, pair, pairs)
         return result
 
@@ -62,6 +77,35 @@ def _contains_token(pair: dict, token_address: str) -> bool:
         (pair.get("baseToken") or {}).get("address"),
         (pair.get("quoteToken") or {}).get("address"),
     }
+
+
+def _first_pair(raw: dict) -> dict | None:
+    pairs = raw.get("pairs")
+    if isinstance(pairs, list) and pairs and isinstance(pairs[0], dict):
+        return pairs[0]
+    pair = raw.get("pair")
+    if isinstance(pair, dict):
+        return pair
+    return None
+
+
+QUOTE_TOKEN_ADDRESSES = {
+    "So11111111111111111111111111111111111111112",
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkYk5k7V8w3VK4Qp",
+}
+
+
+def _primary_token_address(pair: dict) -> str | None:
+    base = pair.get("baseToken") or {}
+    quote = pair.get("quoteToken") or {}
+    base_address = base.get("address")
+    quote_address = quote.get("address")
+    if base_address and base_address not in QUOTE_TOKEN_ADDRESSES:
+        return base_address
+    if quote_address and quote_address not in QUOTE_TOKEN_ADDRESSES:
+        return quote_address
+    return base_address or quote_address
 
 
 def _to_market_data(token_address: str, pair: dict, raw: list[dict]) -> TokenMarketData:

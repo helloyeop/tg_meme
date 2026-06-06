@@ -1,5 +1,8 @@
-from telegram.ca_extractor import extract_solana_addresses, is_valid_solana_address
-
+from telegram.ca_extractor import (
+    extract_dexscreener_solana_identifiers,
+    extract_solana_addresses,
+    is_valid_solana_address,
+)
 
 USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 SOL_MINT = "So11111111111111111111111111111111111111112"
@@ -29,3 +32,11 @@ def test_rejects_invalid_base58_characters() -> None:
 
 def test_rejects_base58_that_does_not_decode_to_32_bytes() -> None:
     assert not is_valid_solana_address("22222222222222222222222222222222")
+
+
+def test_dexscreener_url_path_is_not_treated_as_ca() -> None:
+    pair_address = "4w2cysotx6czaugmmwg13hdpy4qemg2czekyeqyk9ama"
+    text = f"https://dexscreener.com/solana/{pair_address}"
+
+    assert extract_solana_addresses(text) == []
+    assert extract_dexscreener_solana_identifiers(text) == [pair_address]
