@@ -8,6 +8,7 @@ from app.settings import get_settings
 from data_sources.aggregator import DataSourceAggregator
 from db.models import (
     ChannelPerformance,
+    LiveEntrySetup,
     LivePosition,
     LiveQuoteAudit,
     PaperPosition,
@@ -184,17 +185,12 @@ class MessagePipeline:
                             market_data=market_data,
                             decision=decision,
                         )
-                        round_trip_recovery_pct = self._entry_round_trip_recovery_pct(
-                            session,
-                            event=event,
-                            paper_opened=decision.opened,
-                        )
-                        self.live.maybe_stage_entry(
+                        self._stage_live_entry_setup(
                             session,
                             event=event,
                             market_data=market_data,
                             paper_opened=decision.opened,
-                            round_trip_recovery_pct=round_trip_recovery_pct,
+                            decision_reason=decision.reason,
                         )
                     session.commit()
                     processed += 1
@@ -384,6 +380,146 @@ class MessagePipeline:
                 refreshed += 1
             session.commit()
         return refreshed
+
+    def refresh_live_entry_setups(self, force: bool = False) -> int:
+        settings = get_settings()
+        setup_config = self.live.live.get("entry_setup", {})
+        if not setup_config.get("enabled", False):
+            return 0
+
+        refreshed = 0
+        now = datetime.utcnow()
+        with SessionLocal() as session:
+            query = (
+                select(LiveEntrySetup)
+                .where(LiveEntrySetup.status == "WATCHING")
+                .order_by(LiveEntrySetup.created_at.asc(), LiveEntrySetup.id.asc())
+            )
+            if not force:
+                query = query.where(LiveEntrySetup.expires_at >= now)
+            setups = session.scalars(
+                query.limit(settings.paper_fast_monitor_max_tokens)
+            ).all()
+            if not setups:
+                return 0
+
+            token_addresses = list(dict.fromkeys(setup.token_address for setup in setups))
+            market_by_token = self.data_sources.dexscreener.get_tokens_market_data(
+                token_addresses
+            )
+            reclaim_pct = float(setup_config.get("reclaim_pct", 8))
+            for setup in setups:
+                market_data = market_by_token.get(setup.token_address)
+                if setup.expires_at < now:
+                    setup.status = "EXPIRED"
+                    refreshed += 1
+                    continue
+                if market_data is None or market_data.market_cap_usd is None:
+                    continue
+
+                market_data.source = "dexscreener_fast"
+                store_market_snapshot(session, market_data)
+                current_market_cap = market_data.market_cap_usd
+                if (
+                    setup.low_market_cap_usd is None
+                    or current_market_cap < setup.low_market_cap_usd
+                ):
+                    setup.low_market_cap_usd = current_market_cap
+                    setup.low_time = now
+                    setup.reclaim_market_cap_usd = current_market_cap * (
+                        1 + reclaim_pct / 100
+                    )
+
+                dip_reached = setup.low_market_cap_usd <= setup.trigger_market_cap_usd
+                reclaim_reached = (
+                    setup.reclaim_market_cap_usd is not None
+                    and current_market_cap >= setup.reclaim_market_cap_usd
+                )
+                if not (dip_reached and reclaim_reached):
+                    refreshed += 1
+                    continue
+
+                event = session.get(TokenCallEvent, setup.event_id)
+                if event is None:
+                    setup.status = "CANCELLED"
+                    refreshed += 1
+                    continue
+                round_trip_recovery_pct = self._entry_round_trip_recovery_pct(
+                    session,
+                    event=event,
+                    paper_opened=True,
+                )
+                decision = self.live.maybe_stage_entry(
+                    session,
+                    event=event,
+                    market_data=market_data,
+                    paper_opened=True,
+                    round_trip_recovery_pct=round_trip_recovery_pct,
+                )
+                if decision.staged:
+                    setup.status = "ENTERED"
+                    setup.position_id = decision.position.id if decision.position else None
+                    setup.order_id = decision.order.id if decision.order else None
+                else:
+                    setup.decision_reason = decision.reason
+                    if decision.reason in {
+                        "live_position_already_active",
+                        "live_max_open_positions_reached",
+                        "live_entry_paused",
+                        "live_daily_loss_limit_reached",
+                    }:
+                        setup.status = "BLOCKED"
+                refreshed += 1
+            session.commit()
+        return refreshed
+
+    def _stage_live_entry_setup(
+        self,
+        session,
+        *,
+        event: TokenCallEvent,
+        market_data,
+        paper_opened: bool,
+        decision_reason: str,
+    ) -> LiveEntrySetup | None:
+        setup_config = self.live.live.get("entry_setup", {})
+        settings = get_settings()
+        if (
+            not setup_config.get("enabled", False)
+            or not paper_opened
+            or not settings.live_order_staging_enabled
+            or market_data is None
+            or market_data.market_cap_usd is None
+        ):
+            return None
+        existing = session.scalar(
+            select(LiveEntrySetup).where(LiveEntrySetup.event_id == event.id)
+        )
+        if existing is not None:
+            return existing
+        now = datetime.utcnow()
+        observation_seconds = int(setup_config.get("observation_seconds", 600))
+        pullback_pct = float(setup_config.get("pullback_pct", -20))
+        trigger_market_cap = market_data.market_cap_usd * (1 + pullback_pct / 100)
+        setup = LiveEntrySetup(
+            event_id=event.id,
+            channel_id=event.channel_id,
+            token_address=event.token_address,
+            status="WATCHING",
+            setup_type="pullback_reclaim",
+            call_time=event.latest_actionable_call_time
+            or event.first_actionable_call_time
+            or event.first_seen_time,
+            call_market_cap_usd=market_data.market_cap_usd,
+            trigger_market_cap_usd=trigger_market_cap,
+            low_market_cap_usd=market_data.market_cap_usd,
+            low_time=now,
+            expires_at=now + timedelta(seconds=observation_seconds),
+            decision_reason=decision_reason,
+        )
+        session.add(setup)
+        session.flush()
+        return setup
 
     def _entry_round_trip_recovery_pct(
         self,

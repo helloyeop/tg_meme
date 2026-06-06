@@ -407,6 +407,31 @@ class LivePosition(TimestampMixin, Base):
     realized_pnl_sol: Mapped[float] = mapped_column(Float, default=0)
 
 
+class LiveEntrySetup(TimestampMixin, Base):
+    __tablename__ = "live_entry_setups"
+    __table_args__ = (
+        UniqueConstraint("event_id"),
+        Index("idx_live_entry_setups_status", "status", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("token_call_events.id"), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False)
+    token_address: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    setup_type: Mapped[str] = mapped_column(String, nullable=False)
+    call_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    call_market_cap_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    trigger_market_cap_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    reclaim_market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    low_market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    low_time: Mapped[datetime | None] = mapped_column(DateTime)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    decision_reason: Mapped[str | None] = mapped_column(String)
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("live_positions.id"))
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("live_orders.id"))
+
+
 class LiveOrder(Base):
     __tablename__ = "live_orders"
     __table_args__ = (

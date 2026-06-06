@@ -20,6 +20,7 @@ def main() -> None:
             "refresh",
             "position-refresh",
             "live-position-refresh",
+            "live-entry-setup-refresh",
             "live-order-execute",
             "live-control-bot",
             "closed-position-refresh",
@@ -74,6 +75,10 @@ def main() -> None:
         count = pipeline.refresh_live_positions()
         print(f"Evaluated {count} live positions.")
         return
+    if args.mode == "live-entry-setup-refresh":
+        count = pipeline.refresh_live_entry_setups(force=True)
+        print(f"Evaluated {count} live entry setups.")
+        return
     if args.mode == "live-order-execute":
         count = pipeline.execute_live_orders()
         print(f"Executed {count} live orders.")
@@ -82,6 +87,7 @@ def main() -> None:
         pipeline.process_unanalyzed_messages(limit=args.limit)
         pipeline.refresh_open_events(limit=args.limit)
         pipeline.refresh_open_positions()
+        pipeline.refresh_live_entry_setups()
         pipeline.refresh_live_positions()
         pipeline.execute_live_orders()
         pipeline.refresh_closed_positions()

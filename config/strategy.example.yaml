@@ -22,6 +22,12 @@ live:
   daily_max_buy_sol: 1
   max_open_positions: 3
   max_entry_size_sol: 0.5
+  entry_setup:
+    enabled: true
+    observation_seconds: 600
+    pullback_pct: -20
+    reclaim_pct: 8
+    expire_without_entry: true
 
 entry:
   final_signal_score_min: 5

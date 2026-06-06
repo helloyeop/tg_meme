@@ -48,12 +48,17 @@ def get_session() -> Session:
 
 
 def init_db() -> None:
+    _safe_create_all()
+    _migrate_market_cap_columns()
+
+
+def _safe_create_all() -> None:
     try:
         Base.metadata.create_all(bind=engine)
     except OperationalError as exc:
         if "already exists" not in str(exc):
             raise
-    _migrate_market_cap_columns()
+        Base.metadata.create_all(bind=engine)
 
 
 def _migrate_market_cap_columns() -> None:
