@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 
 from app.settings import get_settings
 from data_sources.aggregator import DataSourceAggregator
+from data_sources.types import TokenMarketData, TokenSecurityData
 from db.models import (
     ChannelPerformance,
     LiveEntrySetup,
@@ -444,6 +445,18 @@ class MessagePipeline:
                     setup.status = "CANCELLED"
                     refreshed += 1
                     continue
+                confirmed, terminal_block, reason = self._confirm_live_entry_setup(
+                    session,
+                    setup=setup,
+                    market_data=market_data,
+                    confirmation_config=setup_config.get("gmgn_confirmation", {}),
+                )
+                if not confirmed:
+                    setup.decision_reason = reason
+                    if terminal_block:
+                        setup.status = "BLOCKED"
+                    refreshed += 1
+                    continue
                 round_trip_recovery_pct = self._entry_round_trip_recovery_pct(
                     session,
                     event=event,
@@ -472,6 +485,163 @@ class MessagePipeline:
                 refreshed += 1
             session.commit()
         return refreshed
+
+    def _confirm_live_entry_setup(
+        self,
+        session,
+        *,
+        setup: LiveEntrySetup,
+        market_data: TokenMarketData,
+        confirmation_config: dict,
+    ) -> tuple[bool, bool, str]:
+        if not confirmation_config.get("enabled", False):
+            return True, False, "gmgn_confirmation_disabled"
+
+        confirmation_market = self._get_gmgn_confirmation_market_data(
+            setup.token_address,
+            fallback=market_data,
+        )
+        if confirmation_market is not market_data:
+            store_market_snapshot(session, confirmation_market)
+
+        activity_result = self._check_gmgn_activity_confirmation(
+            confirmation_market,
+            confirmation_config,
+        )
+        if activity_result is not None:
+            return activity_result
+
+        security_data = self._get_gmgn_confirmation_security_data(setup.token_address)
+        if security_data is not None:
+            store_security_snapshot(session, security_data)
+        return self._check_gmgn_security_confirmation(
+            security_data,
+            confirmation_config,
+        )
+
+    def _get_gmgn_confirmation_market_data(
+        self,
+        token_address: str,
+        *,
+        fallback: TokenMarketData,
+    ) -> TokenMarketData:
+        gmgn_client = getattr(self.data_sources, "gmgn", None)
+        if gmgn_client is None:
+            return fallback
+        try:
+            market_data = gmgn_client.get_token_market_data(token_address)
+        except Exception as exc:
+            logger.warning("gmgn confirmation market data failed for %s: %s", token_address, exc)
+            return fallback
+        return market_data or fallback
+
+    def _get_gmgn_confirmation_security_data(
+        self,
+        token_address: str,
+    ) -> TokenSecurityData | None:
+        if hasattr(self.data_sources, "get_security_data"):
+            try:
+                return self.data_sources.get_security_data(token_address)
+            except Exception as exc:
+                logger.warning(
+                    "gmgn confirmation security data failed for %s: %s",
+                    token_address,
+                    exc,
+                )
+                return None
+        gmgn_client = getattr(self.data_sources, "gmgn", None)
+        if gmgn_client is None:
+            return None
+        try:
+            return gmgn_client.get_token_security_data(token_address)
+        except Exception as exc:
+            logger.warning("gmgn confirmation security data failed for %s: %s", token_address, exc)
+            return None
+
+    @staticmethod
+    def _check_gmgn_activity_confirmation(
+        market_data: TokenMarketData,
+        confirmation_config: dict,
+    ) -> tuple[bool, bool, str] | None:
+        missing_activity_allowed = confirmation_config.get("allow_missing_activity_data", True)
+        buys_5m = market_data.buys_5m
+        sells_5m = market_data.sells_5m
+        makers_5m = market_data.makers_5m
+
+        if confirmation_config.get("require_buy_pressure", True):
+            if buys_5m is None or sells_5m is None:
+                if not missing_activity_allowed:
+                    return False, False, "gmgn_missing_buy_sell_activity"
+            else:
+                min_buys = int(confirmation_config.get("min_buys_5m", 1))
+                if buys_5m < min_buys:
+                    return False, False, f"gmgn_buy_activity_low:{buys_5m}<{min_buys}"
+                if sells_5m > 0:
+                    ratio = buys_5m / sells_5m
+                    min_ratio = float(confirmation_config.get("min_buy_sell_ratio", 1.1))
+                    if ratio < min_ratio:
+                        return False, False, f"gmgn_buy_sell_ratio_low:{ratio:.2f}<{min_ratio:.2f}"
+                elif buys_5m <= 0:
+                    return False, False, "gmgn_no_recent_buys"
+
+        min_makers = int(confirmation_config.get("min_makers_5m", 0))
+        if min_makers > 0:
+            if makers_5m is None:
+                if not missing_activity_allowed:
+                    return False, False, "gmgn_missing_maker_activity"
+            elif makers_5m < min_makers:
+                return False, False, f"gmgn_makers_low:{makers_5m}<{min_makers}"
+
+        return None
+
+    @staticmethod
+    def _check_gmgn_security_confirmation(
+        security_data: TokenSecurityData | None,
+        confirmation_config: dict,
+    ) -> tuple[bool, bool, str]:
+        if security_data is None:
+            if confirmation_config.get("allow_missing_security_data", True):
+                return True, False, "gmgn_confirmed_missing_security_allowed"
+            return False, True, "gmgn_missing_security_data"
+
+        max_top10_ratio = confirmation_config.get("max_top10_holder_ratio")
+        if (
+            max_top10_ratio is not None
+            and security_data.top10_holder_ratio is not None
+            and security_data.top10_holder_ratio > float(max_top10_ratio)
+        ):
+            return (
+                False,
+                True,
+                f"gmgn_top10_holder_ratio_high:{security_data.top10_holder_ratio:.2f}>{float(max_top10_ratio):.2f}",
+            )
+
+        max_dev_ratio = confirmation_config.get("max_dev_wallet_ratio")
+        if (
+            max_dev_ratio is not None
+            and security_data.dev_wallet_ratio is not None
+            and security_data.dev_wallet_ratio > float(max_dev_ratio)
+        ):
+            return (
+                False,
+                True,
+                f"gmgn_dev_wallet_ratio_high:{security_data.dev_wallet_ratio:.2f}>{float(max_dev_ratio):.2f}",
+            )
+
+        if (
+            confirmation_config.get("block_mint_authority_active", True)
+            and security_data.mint_authority_active is True
+        ):
+            return False, True, "gmgn_mint_authority_active"
+        if (
+            confirmation_config.get("block_freeze_authority_active", True)
+            and security_data.freeze_authority_active is True
+        ):
+            return False, True, "gmgn_freeze_authority_active"
+        if confirmation_config.get("block_risk_flags", True) and security_data.risk_flags:
+            return False, True, f"gmgn_risk_flags:{','.join(security_data.risk_flags[:3])}"
+
+        return True, False, "gmgn_confirmed"
 
     def _stage_live_entry_setup(
         self,

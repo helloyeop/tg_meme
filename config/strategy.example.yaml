@@ -28,6 +28,19 @@ live:
     pullback_pct: -20
     reclaim_pct: 8
     expire_without_entry: true
+    gmgn_confirmation:
+      enabled: true
+      allow_missing_activity_data: true
+      allow_missing_security_data: true
+      require_buy_pressure: true
+      min_buy_sell_ratio: 1.1
+      min_buys_5m: 1
+      min_makers_5m: 5
+      max_top10_holder_ratio: 45
+      max_dev_wallet_ratio: 5
+      block_mint_authority_active: true
+      block_freeze_authority_active: true
+      block_risk_flags: true
 
 entry:
   final_signal_score_min: 5

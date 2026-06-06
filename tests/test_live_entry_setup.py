@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.pipeline import MessagePipeline
-from data_sources.types import TokenMarketData
+from data_sources.types import TokenMarketData, TokenSecurityData
 from db.models import Base, LiveEntrySetup, LiveOrder, TokenCallEvent
 
 
@@ -42,6 +42,20 @@ def live_strategy():
                 "observation_seconds": 600,
                 "pullback_pct": -20,
                 "reclaim_pct": 8,
+                "gmgn_confirmation": {
+                    "enabled": True,
+                    "allow_missing_activity_data": True,
+                    "allow_missing_security_data": True,
+                    "require_buy_pressure": True,
+                    "min_buy_sell_ratio": 1.1,
+                    "min_buys_5m": 1,
+                    "min_makers_5m": 5,
+                    "max_top10_holder_ratio": 45,
+                    "max_dev_wallet_ratio": 5,
+                    "block_mint_authority_active": True,
+                    "block_freeze_authority_active": True,
+                    "block_risk_flags": True,
+                },
             },
         }
     }
@@ -144,3 +158,135 @@ def test_live_entry_setup_enters_after_pullback_reclaim(monkeypatch) -> None:
     assert setup.status == "ENTERED"
     assert order is not None
     assert order.side == "BUY"
+
+
+def test_live_entry_setup_waits_when_gmgn_buy_pressure_is_weak(monkeypatch) -> None:
+    session_factory, session = make_session(monkeypatch)
+    now = datetime.utcnow()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=now,
+        first_actionable_call_time=now,
+    )
+    session.add(event)
+    session.flush()
+    session.add(
+        LiveEntrySetup(
+            event_id=event.id,
+            channel_id="channel",
+            token_address="mint",
+            status="WATCHING",
+            setup_type="pullback_reclaim",
+            call_time=now,
+            call_market_cap_usd=100_000,
+            trigger_market_cap_usd=80_000,
+            low_market_cap_usd=79_000,
+            low_time=now,
+            reclaim_market_cap_usd=85_320,
+            expires_at=now + timedelta(minutes=10),
+        )
+    )
+    session.commit()
+
+    monkeypatch.setattr("app.pipeline.get_settings", live_settings)
+    pipeline = MessagePipeline()
+    pipeline.live.strategy = live_strategy()
+    pipeline.live.live = live_strategy()["live"]
+    pipeline.live.settings = live_settings()
+    pipeline.data_sources = SimpleNamespace(
+        dexscreener=SimpleNamespace(
+            get_tokens_market_data=lambda _: {
+                "mint": TokenMarketData(
+                    source="dexscreener_fast",
+                    token_address="mint",
+                    market_cap_usd=86_000,
+                    buys_5m=2,
+                    sells_5m=4,
+                    makers_5m=9,
+                )
+            }
+        ),
+        get_security_data=lambda _: TokenSecurityData(
+            source="gmgn",
+            token_address="mint",
+            top10_holder_ratio=20,
+            dev_wallet_ratio=1,
+        ),
+    )
+
+    count = pipeline.refresh_live_entry_setups(force=True)
+
+    verify_session = session_factory()
+    setup = verify_session.scalar(select(LiveEntrySetup))
+    order = verify_session.scalar(select(LiveOrder))
+    assert count == 1
+    assert setup.status == "WATCHING"
+    assert setup.decision_reason.startswith("gmgn_buy_sell_ratio_low")
+    assert order is None
+
+
+def test_live_entry_setup_blocks_when_gmgn_security_is_risky(monkeypatch) -> None:
+    session_factory, session = make_session(monkeypatch)
+    now = datetime.utcnow()
+    event = TokenCallEvent(
+        channel_id="channel",
+        token_address="mint",
+        first_seen_time=now,
+        first_actionable_call_time=now,
+    )
+    session.add(event)
+    session.flush()
+    session.add(
+        LiveEntrySetup(
+            event_id=event.id,
+            channel_id="channel",
+            token_address="mint",
+            status="WATCHING",
+            setup_type="pullback_reclaim",
+            call_time=now,
+            call_market_cap_usd=100_000,
+            trigger_market_cap_usd=80_000,
+            low_market_cap_usd=79_000,
+            low_time=now,
+            reclaim_market_cap_usd=85_320,
+            expires_at=now + timedelta(minutes=10),
+        )
+    )
+    session.commit()
+
+    monkeypatch.setattr("app.pipeline.get_settings", live_settings)
+    pipeline = MessagePipeline()
+    pipeline.live.strategy = live_strategy()
+    pipeline.live.live = live_strategy()["live"]
+    pipeline.live.settings = live_settings()
+    pipeline.data_sources = SimpleNamespace(
+        dexscreener=SimpleNamespace(
+            get_tokens_market_data=lambda _: {
+                "mint": TokenMarketData(
+                    source="dexscreener_fast",
+                    token_address="mint",
+                    market_cap_usd=86_000,
+                    buys_5m=8,
+                    sells_5m=3,
+                    makers_5m=9,
+                )
+            }
+        ),
+        get_security_data=lambda _: TokenSecurityData(
+            source="gmgn",
+            token_address="mint",
+            top10_holder_ratio=60,
+            dev_wallet_ratio=1,
+        ),
+    )
+
+    count = pipeline.refresh_live_entry_setups(force=True)
+
+    verify_session = session_factory()
+    setup = verify_session.scalar(select(LiveEntrySetup))
+    order = verify_session.scalar(select(LiveOrder))
+    assert count == 1
+    assert setup.status == "BLOCKED"
+    assert setup.decision_reason.startswith("gmgn_top10_holder_ratio_high")
+    assert order is None

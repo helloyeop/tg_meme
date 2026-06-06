@@ -31,6 +31,20 @@ def test_strategy_example_keeps_v1_paper_risk_limits():
         "pullback_pct": -20,
         "reclaim_pct": 8,
         "expire_without_entry": True,
+        "gmgn_confirmation": {
+            "enabled": True,
+            "allow_missing_activity_data": True,
+            "allow_missing_security_data": True,
+            "require_buy_pressure": True,
+            "min_buy_sell_ratio": 1.1,
+            "min_buys_5m": 1,
+            "min_makers_5m": 5,
+            "max_top10_holder_ratio": 45,
+            "max_dev_wallet_ratio": 5,
+            "block_mint_authority_active": True,
+            "block_freeze_authority_active": True,
+            "block_risk_flags": True,
+        },
     }
     assert strategy["actionable_recall"]["min_minutes_since_previous_actionable"] == 60
     assert strategy["actionable_recall"]["entry_size_factor"] == 0.50
