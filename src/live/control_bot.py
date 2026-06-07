@@ -10,9 +10,15 @@ from live.control import (
     get_position_detail,
     list_live_positions,
     set_live_entry_paused,
+    stage_manual_buy,
     stage_manual_sell,
     update_stop_loss,
     update_take_profit,
+)
+from telegram.ca_extractor import (
+    extract_dexscreener_solana_identifiers,
+    extract_solana_addresses,
+    is_valid_solana_address,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,6 +29,7 @@ Live control commands
 /pos <id> - show live position details
 /pause_live - pause new live entries
 /resume_live - resume new live entries
+/buy <CA> - stage a manual BUY using the same live TP/SL rules
 /sell <id> - stage a full manual SELL
 /tp <id> <pct> - set take-profit percent, e.g. /tp 5 20
 /sl <id> <pct> - set stop-loss percent, e.g. /sl 5 -70
@@ -128,6 +135,15 @@ class LiveControlBot:
                     set_live_entry_paused(session, False, "telegram_control_bot")
                     session.commit()
                 return "New live entries resumed."
+            if command == "/buy":
+                token_address = _parse_token_address_arg(parts, 1)
+                with get_session() as session:
+                    result = stage_manual_buy(session, token_address)
+                    if result.ok:
+                        session.commit()
+                    else:
+                        session.rollback()
+                    return result.message
             if command == "/sell":
                 position_id = _parse_int_arg(parts, 1, "position id")
                 with get_session() as session:
@@ -191,6 +207,21 @@ def _parse_float_arg(parts: list[str], index: int, label: str) -> float:
         return float(parts[index])
     except ValueError as exc:
         raise ValueError(f"Invalid {label}: {parts[index]}") from exc
+
+
+def _parse_token_address_arg(parts: list[str], index: int) -> str:
+    if len(parts) <= index:
+        raise ValueError("Missing Solana token address.")
+    raw = " ".join(parts[index:])
+    if is_valid_solana_address(parts[index]):
+        return parts[index]
+    addresses = extract_solana_addresses(raw)
+    if addresses:
+        return addresses[0]
+    for identifier in extract_dexscreener_solana_identifiers(raw):
+        if is_valid_solana_address(identifier):
+            return identifier
+    raise ValueError(f"Invalid Solana token address: {parts[index]}")
 
 
 def run_live_control_bot() -> None:

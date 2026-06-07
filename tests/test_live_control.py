@@ -3,22 +3,60 @@ from datetime import datetime
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from data_sources.types import TokenMarketData
 from db.models import Base, LiveOrder, LivePosition, TokenCallEvent, TokenMarketSnapshot
 from live.control import (
     get_position_detail,
     list_live_positions,
     live_entry_paused,
     set_live_entry_paused,
+    stage_manual_buy,
     stage_manual_sell,
     update_stop_loss,
     update_take_profit,
 )
+from live.control_bot import _parse_token_address_arg
+from live.engine import LiveTradingEngine
+
+TOKEN = "5s7tf6ih2CEZf7ZPNkJAtcknAq9DL5GsWHMMT3Jdpump"
 
 
 def make_session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine)()
+
+
+class LiveSettings:
+    live_order_staging_enabled = True
+    live_wallet_public_key = "wallet"
+    live_execution_adapter = "disabled"
+    jupiter_api_key = None
+    jupiter_swap_base_url = "https://api.jup.ag/swap/v2"
+
+
+def live_strategy():
+    return {
+        "live": {
+            "entry_size_sol": 0.05,
+            "take_profit_pct": 10,
+            "take_profit_by_entry_market_cap": {
+                "below_500k_pct": 30,
+                "from_500k_to_below_1m_pct": 20,
+                "at_or_above_1m_pct": 10,
+            },
+            "stop_loss_pct": -70,
+            "stop_loss_by_entry_market_cap": {
+                "below_500k_pct": -35,
+                "from_500k_to_below_1m_pct": -30,
+                "from_1m_to_below_5m_pct": -25,
+                "at_or_above_5m_pct": -20,
+            },
+            "daily_max_loss_sol": 1,
+            "max_open_positions": 1,
+            "max_entry_size_sol": 0.05,
+        }
+    }
 
 
 def add_live_position(session, status: str = "OPEN") -> LivePosition:
@@ -109,3 +147,68 @@ def test_update_take_profit_and_stop_loss() -> None:
     assert "Bull Token (BULL)" in detail.message
     assert "TP: +20%" in detail.message
     assert "SL: -50%" in detail.message
+
+
+class FakeDataSources:
+    def __init__(self, market_cap_usd: float = 600_000):
+        self.market_cap_usd = market_cap_usd
+
+    def get_market_data(self, token_address: str) -> TokenMarketData:
+        return TokenMarketData(
+            source="test",
+            token_address=token_address,
+            symbol="MAN",
+            name="Manual Token",
+            market_cap_usd=self.market_cap_usd,
+        )
+
+
+def test_manual_buy_stages_live_buy_with_existing_tp_sl_rules() -> None:
+    session = make_session()
+    strategy = live_strategy()
+    strategy["live"]["max_open_positions"] = 3
+    live = LiveTradingEngine(strategy, LiveSettings())
+
+    result = stage_manual_buy(
+        session,
+        TOKEN,
+        data_sources=FakeDataSources(600_000),
+        live=live,
+        now=datetime(2026, 6, 7, 12, 0, 0),
+    )
+
+    assert result.ok is True
+    assert "Manual BUY staged" in result.message
+    assert "Manual Token (MAN)" in result.message
+    position = session.scalar(select(LivePosition))
+    assert position is not None
+    assert position.channel_id.startswith("manual_live_control:")
+    assert position.token_address == TOKEN
+    assert position.target_profit_pct == 20
+    assert position.stop_loss_pct == -30
+    order = session.scalar(select(LiveOrder))
+    assert order.side == "BUY"
+    assert order.reason == "signal_entry"
+
+
+def test_manual_buy_rejects_active_position_for_same_token() -> None:
+    session = make_session()
+    position = add_live_position(session)
+    position.token_address = TOKEN
+    strategy = live_strategy()
+    strategy["live"]["max_open_positions"] = 3
+
+    result = stage_manual_buy(
+        session,
+        TOKEN,
+        data_sources=FakeDataSources(),
+        live=LiveTradingEngine(strategy, LiveSettings()),
+    )
+
+    assert result.ok is False
+    assert "active live position" in result.message
+
+
+def test_control_bot_parses_manual_buy_token_address() -> None:
+    assert _parse_token_address_arg(["/buy", TOKEN], 1) == TOKEN
+    assert _parse_token_address_arg(["/buy", f"https://dexscreener.com/solana/{TOKEN}"], 1) == TOKEN
