@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .streamlit/credentials.toml
 .streamlit/secrets.toml
 .DS_Store
@@ -7,11 +9,20 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 *.session
 *.session-journal
 sessions/
 signer-data/
 wallet-secrets/
+*.pem
+*.key
+id_rsa
+id_ed25519
 node_modules/
 config/channels.yaml
 config/strategy.yaml

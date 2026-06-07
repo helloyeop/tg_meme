@@ -1,20 +1,33 @@
 # Memecoin Telegram Call Bot
 
-Solana-only Telegram call analytics and paper-trading system.
+Solana-only Telegram call analytics, market-cap tracking, paper trading, and
+guarded live-trading research system for memecoin call channels.
 
-Version 1 is strictly paper trading:
+The project is designed around auditability and safety:
 
-- No real trade execution.
-- `DRY_RUN=true` by default.
-- No private key is required or used.
-- Telegram reading uses Telethon user account login.
-- Alerts use a personal Telegram bot only for outbound messages.
-- Market cap is the primary call-performance and paper-trading reference; token price is retained as raw market context.
-- Open paper positions are market-cap monitored every 5 seconds through a bounded DexScreener batch request.
-- Closed paper positions continue counterfactual market-cap tracking every 15 minutes, reusing any recent open-position snapshot for the same token.
-- Market and security snapshots store normalized fields by default; large API `raw_json` payload storage is opt-in.
-- Message classification defaults to OpenAI `gpt-5.4-nano`, with selective low-confidence high-impact review by `gpt-5.4-mini`.
-- A CA-only post can inherit one unused same-channel action message from the preceding 60 seconds; ambiguous candidates never trigger contextual entry.
+- `DRY_RUN=true` and live execution disabled by default.
+- Paper trading remains the baseline analytics ledger.
+- Optional live trading is isolated behind a signer service that is not mounted
+  by the collector, pipeline, or dashboard containers.
+- No private key, seed phrase, Telegram session, SQLite database, or runtime
+  `.env` file belongs in Git.
+- Telegram reading uses Telethon user-account login for channels the operator
+  can already access.
+- Alerts and live controls use a personal Telegram bot.
+- Solana contract addresses are the only supported token identifiers.
+- Market cap is the primary performance reference; price is retained as market
+  context.
+- Open paper positions are market-cap monitored every 5 seconds through bounded
+  DexScreener batch requests.
+- Closed paper positions continue counterfactual market-cap tracking every 15
+  minutes for strategy analysis.
+- Message classification defaults to OpenAI `gpt-5.4-nano`, with selective
+  low-confidence high-impact review by `gpt-5.4-mini`.
+- A CA-only post can inherit one unused same-channel action message from the
+  preceding 60 seconds; ambiguous candidates never trigger contextual entry.
+
+This is experimental trading infrastructure, not financial advice. Use a
+dedicated wallet with limited funds if enabling live trading.
 
 ## Setup
 
@@ -32,6 +45,7 @@ PYTHONPATH=src python -m app.main --mode init-db
 Fill `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in `.env` before collector or history modes.
 Set `LLM_API_KEY` to enable the default OpenAI classifier. If it is missing or the configured
 provider fails, local Ollama can be kept as fallback through `LLM_FALLBACK_TO_OLLAMA=true`.
+Keep `.env`, `sessions/`, `data/`, `wallet-secrets/`, and `signer-data/` local only.
 
 The default LLM flow classifies every message with `gpt-5.4-nano`. Results classified as
 `BUY_CALL`, `WARNING`, `SOLD`, or `TAKE_PROFIT` below confidence `0.75` are reviewed once
@@ -158,6 +172,8 @@ Persist these paths on a VPS:
 - `data/` for SQLite.
 - Telethon session file from `TELEGRAM_SESSION_NAME`.
 - `.env` and `config/*.yaml`.
+- `wallet-secrets/` and `signer-data/` only when explicitly enabling the live
+  signer profile.
 
 Recommended services:
 
@@ -169,3 +185,5 @@ Deployment docs:
 
 - `docs/VPS_DEPLOYMENT.md`
 - `docs/GITHUB_DEPLOYMENT.md`
+- `docs/LIVE_TRADING.md`
+- `docs/PUBLIC_RELEASE_CHECKLIST.md`

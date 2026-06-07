@@ -28,9 +28,13 @@ Keep GitHub as the source of truth for code only. Keep runtime state on the VPS.
 - `.env`
 - `data/`
 - `sessions/`
+- `wallet-secrets/`
+- `signer-data/`
 - `config/channels.yaml`
 - `config/strategy.yaml`
 - Telegram `.session` files
+- SQLite `.db`, `.sqlite`, `-wal`, and `-shm` files
+- SSH keys, wallet keypairs, private keys, seed phrases, API keys, bot tokens
 - local logs
 
 ## First-Time Local Git Setup
@@ -111,3 +115,9 @@ Optional secrets:
 - `VPS_APP_DIR`
 
 Do not add application API keys to GitHub Actions. Keep `.env` only on the VPS.
+
+## Public Repository Notes
+
+If the repository is made public, keep it as code and documentation only.
+Runtime state and credentials must remain on the operator's machine or VPS.
+Before changing visibility, run the checks in `docs/PUBLIC_RELEASE_CHECKLIST.md`.

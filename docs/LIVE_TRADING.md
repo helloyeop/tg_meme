@@ -9,7 +9,10 @@ tables and a separate engine so experiments do not change paper-trading history.
 - The live entry size is `0.5 SOL`.
 - An `OPEN` live position stages one `SELL` intent using the target fixed at
   entry time: `+30%` below `$500K`, `+20%` from `$500K` to below `$1M`, or
-  `+10%` at or above `$1M`. The emergency stop-loss remains `-70%`.
+  `+10%` at or above `$1M`.
+- New live positions use market-cap-tiered emergency stops by entry market cap:
+  `-35%` below `$500K`, `-30%` from `$500K` to below `$1M`, `-25%` from `$1M`
+  to below `$5M`, and `-20%` at or above `$5M`.
 - The app refuses new entries after `1 SOL` of realized live losses in a day.
 - The isolated signer applies an additional `1 SOL` daily BUY spend ceiling.
 - Before staging a live entry, the pipeline requests a Jupiter
@@ -17,7 +20,10 @@ tables and a separate engine so experiments do not change paper-trading history.
   immediately executable recovery is below `90%`.
 - Open live positions are also monitored with Jupiter full-position SELL
   quotes for executable take-profit evaluation and audit records. The only
-  live stop-loss is the market-cap-based `-70%` emergency stop-loss.
+  live stop-loss is the market-cap-based emergency stop-loss.
+- The Telegram live-control bot can stage manual buys through `/buy <CA>`.
+  Manual buys still use the same entry size, TP, SL, daily-loss, max-position,
+  and quote-protection rules.
 
 ## Signer Isolation
 
@@ -31,7 +37,7 @@ The default environment keeps transaction execution disabled:
 ```dotenv
 LIVE_ORDER_STAGING_ENABLED=false
 LIVE_EXECUTION_ADAPTER=disabled
-LIVE_WALLET_PUBLIC_KEY=FFDuhHWsDuoUrFAY3Ggk8gty8EeNjArrXLC21UcULvvh
+LIVE_WALLET_PUBLIC_KEY=
 LIVE_SIGNER_BASE_URL=http://signer:8787
 LIVE_SIGNER_AUTH_TOKEN=
 LIVE_SIGNER_KEYPAIR_PATH=/run/wallet-secrets/live-wallet.json
@@ -101,7 +107,7 @@ shell history.
 
    ```bash
    cd /opt/memetrading
-   LIVE_WALLET_PUBLIC_KEY_VALUE=FFDuhHWsDuoUrFAY3Ggk8gty8EeNjArrXLC21UcULvvh \
+   LIVE_WALLET_PUBLIC_KEY_VALUE=<your-dedicated-live-wallet-public-key> \
      bash scripts/reconcile_vps_env.sh .env
    ```
 5. Keep `LIVE_EXECUTION_ADAPTER=disabled` while running staged-order QA.
@@ -194,7 +200,7 @@ bash scripts/disable_live_trading.sh
 
 ## Operational Record
 
-Decision recorded on `2026-05-30`:
+Operational decision record:
 
 - The Phantom private key is entered only through hidden input in the VPS
   terminal.
@@ -210,16 +216,14 @@ Decision recorded on `2026-05-30`:
 - Never print, log, commit, upload, or paste the private key, recovery phrase,
   or keypair JSON into chat.
 
-Activation record on `2026-05-30`:
+Activation record:
 
 - Helius RPC free-tier routing was verified with signer readiness.
 - Jupiter quote-only QA succeeded without transaction submission.
 - A manually approved `0.01 SOL -> USDC -> SOL` round-trip swap succeeded.
-- Automated live trading was enabled with `0.5 SOL` entries, take-profit quote
-  protection, `-70%` emergency stop-loss, and `1 SOL` daily realized-loss
-  limit. On `2026-06-01`, take-profit targets were changed for new positions to
-  `+30%` below `$500K`, `+20%` from `$500K` to below `$1M`, and `+10%` at or
-  above `$1M`.
+- Automated live trading can be enabled with `0.5 SOL` entries, take-profit
+  quote protection, market-cap-tiered emergency stops, and a `1 SOL` daily
+  realized-loss limit.
 - The signer still enforces a `1 SOL` daily BUY ceiling and `0.05 SOL` fee
   reserve.
 - Emergency stop command:
