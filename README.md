@@ -29,6 +29,10 @@ The project is designed around auditability and safety:
 This is experimental trading infrastructure, not financial advice. Use a
 dedicated wallet with limited funds if enabling live trading.
 
+## Workflow Illustration
+
+![Memecoin Telegram Call Bot workflow](docs/workflow_xiaohei_illustration.svg)
+
 ## Setup
 
 ```bash
