@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.pipeline import MessagePipeline
 from data_sources.types import TokenMarketData, TokenSecurityData, TokenWalletFlowData
-from db.models import Base, LiveEntrySetup, LiveOrder, TokenCallEvent
+from db.models import Base, LiveEntrySetup, LiveOrder, ManualLiveTrigger, TokenCallEvent
 
 
 def make_session(monkeypatch):
@@ -101,6 +101,14 @@ def live_settings():
         live_execution_adapter="disabled",
         paper_fast_monitor_max_tokens=30,
     )
+
+
+class StubDex:
+    def __init__(self, market_data: TokenMarketData):
+        self.market_data = market_data
+
+    def get_tokens_market_data(self, token_addresses: list[str]) -> dict[str, TokenMarketData]:
+        return {self.market_data.token_address: self.market_data}
 
 
 def test_live_entry_setup_replaces_immediate_live_entry(monkeypatch) -> None:
@@ -548,3 +556,84 @@ def test_live_entry_setup_blocks_when_smart_money_is_selling(monkeypatch) -> Non
     assert setup.status == "BLOCKED"
     assert setup.decision_reason.startswith("smart_money_net_selling")
     assert order is None
+
+
+def test_manual_buy_trigger_stages_entry_when_market_cap_reaches_target(monkeypatch) -> None:
+    session_factory, session = make_session(monkeypatch)
+    trigger = ManualLiveTrigger(
+        side="BUY",
+        token_address="mint",
+        status="WATCHING",
+        target_market_cap_usd=300_000,
+        entry_size_sol=0.5,
+        trigger_direction="AT_OR_BELOW",
+        created_by="telegram_control_bot",
+    )
+    session.add(trigger)
+    session.commit()
+
+    settings = live_settings()
+    settings.live_execution_adapter = "disabled"
+    monkeypatch.setattr("app.pipeline.get_settings", lambda: settings)
+    pipeline = MessagePipeline()
+    pipeline.live.strategy = live_strategy()
+    pipeline.live.live = live_strategy()["live"]
+    pipeline.live.settings = settings
+    pipeline.data_sources.dexscreener = StubDex(
+        TokenMarketData(
+            source="dexscreener",
+            token_address="mint",
+            market_cap_usd=290_000,
+        )
+    )
+
+    refreshed = pipeline.refresh_manual_live_triggers()
+
+    with session_factory() as verify_session:
+        trigger = verify_session.scalar(select(ManualLiveTrigger))
+        order = verify_session.scalar(select(LiveOrder))
+        assert refreshed == 1
+        assert trigger.status == "TRIGGERED"
+        assert trigger.triggered_market_cap_usd == 290_000
+        assert trigger.order_id == order.id
+        assert order.side == "BUY"
+        assert order.requested_size_sol == 0.5
+
+
+def test_manual_buy_trigger_waits_above_target_market_cap(monkeypatch) -> None:
+    session_factory, session = make_session(monkeypatch)
+    session.add(
+        ManualLiveTrigger(
+            side="BUY",
+            token_address="mint",
+            status="WATCHING",
+            target_market_cap_usd=300_000,
+            entry_size_sol=0.5,
+            trigger_direction="AT_OR_BELOW",
+            created_by="telegram_control_bot",
+        )
+    )
+    session.commit()
+
+    settings = live_settings()
+    monkeypatch.setattr("app.pipeline.get_settings", lambda: settings)
+    pipeline = MessagePipeline()
+    pipeline.live.strategy = live_strategy()
+    pipeline.live.live = live_strategy()["live"]
+    pipeline.live.settings = settings
+    pipeline.data_sources.dexscreener = StubDex(
+        TokenMarketData(
+            source="dexscreener",
+            token_address="mint",
+            market_cap_usd=310_000,
+        )
+    )
+
+    refreshed = pipeline.refresh_manual_live_triggers()
+
+    with session_factory() as verify_session:
+        trigger = verify_session.scalar(select(ManualLiveTrigger))
+        order = verify_session.scalar(select(LiveOrder))
+        assert refreshed == 1
+        assert trigger.status == "WATCHING"
+        assert order is None

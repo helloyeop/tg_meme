@@ -458,6 +458,30 @@ class LiveEntrySetup(TimestampMixin, Base):
     order_id: Mapped[int | None] = mapped_column(ForeignKey("live_orders.id"))
 
 
+class ManualLiveTrigger(TimestampMixin, Base):
+    __tablename__ = "manual_live_triggers"
+    __table_args__ = (
+        Index("idx_manual_live_triggers_status", "status", "target_market_cap_usd"),
+        Index("idx_manual_live_triggers_token", "token_address", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    side: Mapped[str] = mapped_column(String, nullable=False)
+    token_address: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="WATCHING")
+    target_market_cap_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_size_sol: Mapped[float | None] = mapped_column(Float)
+    sell_ratio: Mapped[float | None] = mapped_column(Float)
+    trigger_direction: Mapped[str] = mapped_column(String, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String)
+    triggered_at: Mapped[datetime | None] = mapped_column(DateTime)
+    triggered_market_cap_usd: Mapped[float | None] = mapped_column(Float)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("token_call_events.id"))
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("live_positions.id"))
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("live_orders.id"))
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+
+
 class LiveOrder(Base):
     __tablename__ = "live_orders"
     __table_args__ = (

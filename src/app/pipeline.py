@@ -10,8 +10,10 @@ from data_sources.types import TokenMarketData, TokenSecurityData
 from db.models import (
     ChannelPerformance,
     LiveEntrySetup,
+    LiveOrder,
     LivePosition,
     LiveQuoteAudit,
+    ManualLiveTrigger,
     PaperPosition,
     TelegramMessage,
     TokenCallEvent,
@@ -502,6 +504,197 @@ class MessagePipeline:
                 refreshed += 1
             session.commit()
         return refreshed
+
+    def refresh_manual_live_triggers(self) -> int:
+        refreshed = 0
+        with SessionLocal() as session:
+            triggers = session.scalars(
+                select(ManualLiveTrigger)
+                .where(ManualLiveTrigger.status == "WATCHING")
+                .order_by(ManualLiveTrigger.created_at.asc(), ManualLiveTrigger.id.asc())
+            ).all()
+            if not triggers:
+                return 0
+            token_addresses = list(dict.fromkeys(trigger.token_address for trigger in triggers))
+            market_by_token = self.data_sources.dexscreener.get_tokens_market_data(
+                token_addresses[: get_settings().paper_fast_monitor_max_tokens]
+            )
+            now = datetime.utcnow()
+            for trigger in triggers:
+                market_data = market_by_token.get(trigger.token_address)
+                if market_data is None or market_data.market_cap_usd is None:
+                    continue
+                store_market_snapshot(session, market_data)
+                if not self._manual_trigger_reached(trigger, market_data.market_cap_usd):
+                    refreshed += 1
+                    continue
+                if trigger.side == "BUY":
+                    self._execute_manual_buy_trigger(session, trigger, market_data, now)
+                elif trigger.side == "SELL":
+                    self._execute_manual_sell_trigger(session, trigger, market_data, now)
+                refreshed += 1
+            session.commit()
+        return refreshed
+
+    @staticmethod
+    def _manual_trigger_reached(
+        trigger: ManualLiveTrigger,
+        current_market_cap_usd: float,
+    ) -> bool:
+        if trigger.trigger_direction == "AT_OR_BELOW":
+            return current_market_cap_usd <= trigger.target_market_cap_usd
+        return current_market_cap_usd >= trigger.target_market_cap_usd
+
+    def _execute_manual_buy_trigger(
+        self,
+        session,
+        trigger: ManualLiveTrigger,
+        market_data,
+        now: datetime,
+    ) -> None:
+        event = TokenCallEvent(
+            channel_id=f"manual_live_trigger:{trigger.id}",
+            token_address=trigger.token_address,
+            first_seen_time=now,
+            first_actionable_call_time=now,
+            latest_actionable_call_time=now,
+            first_seen_price_usd=market_data.price_usd,
+            first_seen_fdv_usd=market_data.fdv_usd,
+            first_seen_market_cap_usd=market_data.market_cap_usd,
+            first_actionable_market_cap_usd=market_data.market_cap_usd,
+            latest_actionable_market_cap_usd=market_data.market_cap_usd,
+            first_seen_liquidity_usd=market_data.liquidity_usd,
+            latest_price_usd=market_data.price_usd,
+            latest_fdv_usd=market_data.fdv_usd,
+            latest_market_cap_usd=market_data.market_cap_usd,
+            latest_liquidity_usd=market_data.liquidity_usd,
+            last_update_time=now,
+            call_count=1,
+            actionable_signal_count=1,
+        )
+        session.add(event)
+        session.flush()
+        decision = self.live.maybe_stage_entry(
+            session,
+            event=event,
+            market_data=market_data,
+            paper_opened=True,
+            round_trip_recovery_pct=self._manual_trigger_round_trip_recovery_pct(
+                session,
+                trigger=trigger,
+                event=event,
+            ),
+            entry_size_sol=trigger.entry_size_sol,
+            now=now,
+        )
+        trigger.triggered_at = now
+        trigger.triggered_market_cap_usd = market_data.market_cap_usd
+        trigger.event_id = event.id
+        trigger.status = "TRIGGERED" if decision.staged else "FAILED"
+        trigger.decision_reason = decision.reason
+        if decision.position is not None:
+            trigger.position_id = decision.position.id
+        if decision.order is not None:
+            trigger.order_id = decision.order.id
+
+    def _execute_manual_sell_trigger(
+        self,
+        session,
+        trigger: ManualLiveTrigger,
+        market_data,
+        now: datetime,
+    ) -> None:
+        if trigger.sell_ratio not in (None, 100):
+            trigger.status = "FAILED"
+            trigger.triggered_at = now
+            trigger.triggered_market_cap_usd = market_data.market_cap_usd
+            trigger.decision_reason = "partial_manual_sell_trigger_not_supported"
+            return
+        position = session.scalars(
+            select(LivePosition)
+            .where(
+                LivePosition.token_address == trigger.token_address,
+                LivePosition.status == "OPEN",
+            )
+            .order_by(LivePosition.entry_time.asc(), LivePosition.id.asc())
+            .limit(1)
+        ).first()
+        trigger.triggered_at = now
+        trigger.triggered_market_cap_usd = market_data.market_cap_usd
+        if position is None:
+            trigger.status = "FAILED"
+            trigger.decision_reason = "no_open_live_position_for_token"
+            return
+        if self.live._has_pending_exit(session, position.id):
+            trigger.status = "FAILED"
+            trigger.position_id = position.id
+            trigger.decision_reason = "live_exit_already_staged"
+            return
+        position.status = "EXIT_REQUESTED"
+        position.exit_requested_time = now
+        order = LiveOrder(
+            event_id=position.event_id,
+            position_id=position.id,
+            channel_id=position.channel_id,
+            token_address=position.token_address,
+            side="SELL",
+            status="STAGED",
+            reason=f"manual_market_cap_sell_trigger_{trigger.id}",
+            requested_at=now,
+            reference_market_cap_usd=market_data.market_cap_usd,
+            target_market_cap_usd=trigger.target_market_cap_usd,
+        )
+        session.add(order)
+        session.flush()
+        trigger.status = "TRIGGERED"
+        trigger.position_id = position.id
+        trigger.order_id = order.id
+        trigger.decision_reason = "manual_sell_trigger_staged"
+
+    def _manual_trigger_round_trip_recovery_pct(
+        self,
+        session,
+        *,
+        trigger: ManualLiveTrigger,
+        event: TokenCallEvent,
+    ) -> float | None:
+        settings = get_settings()
+        if (
+            not settings.live_order_staging_enabled
+            or settings.live_execution_adapter != "signer_service"
+            or not self.live.live.get("require_entry_round_trip_quote", False)
+        ):
+            return None
+        entry_size_sol = trigger.entry_size_sol or self.live._entry_size_sol(event)
+        amount = int(entry_size_sol * LAMPORTS_PER_SOL)
+        try:
+            quote = self.live_executor.signer.quote_buy_round_trip(
+                token_address=trigger.token_address,
+                amount=amount,
+            )
+        except Exception as exc:
+            self._store_live_quote_audit(
+                session,
+                event_id=event.id,
+                token_address=trigger.token_address,
+                quote_type="ENTRY_ROUND_TRIP",
+                status="ERROR",
+                input_amount=amount,
+                reason=str(exc),
+            )
+            return None
+        self._store_live_quote_audit(
+            session,
+            event_id=event.id,
+            token_address=trigger.token_address,
+            quote_type="ENTRY_ROUND_TRIP",
+            status="QUOTED",
+            input_amount=amount,
+            output_amount=int(quote["sell"]["out_amount"]),
+            recovery_pct=float(quote["recovery_pct"]),
+            quote=quote,
+        )
+        return float(quote["recovery_pct"])
 
     @staticmethod
     def _setup_requires_reclaim(setup: LiveEntrySetup) -> bool:

@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 from alerts.bot import format_token_label, format_usd, short_token_address
 from app.settings import get_settings
 from data_sources.aggregator import DataSourceAggregator
-from db.models import LiveControlState, LiveOrder, LivePosition, TokenCallEvent, TokenMarketSnapshot
+from db.models import (
+    LiveControlState,
+    LiveOrder,
+    LivePosition,
+    ManualLiveTrigger,
+    TokenCallEvent,
+    TokenMarketSnapshot,
+)
 from db.repositories import store_market_snapshot
 
 ENTRY_PAUSED_KEY = "live_entry_paused"
@@ -202,6 +209,112 @@ def stage_manual_buy(
             ]
         ),
     )
+
+
+def create_manual_buy_trigger(
+    session: Session,
+    token_address: str,
+    *,
+    target_market_cap_usd: float,
+    entry_size_sol: float,
+) -> ControlResult:
+    if entry_size_sol <= 0:
+        return ControlResult(False, "Entry size must be positive.")
+    trigger = ManualLiveTrigger(
+        side="BUY",
+        token_address=token_address,
+        status="WATCHING",
+        target_market_cap_usd=target_market_cap_usd,
+        entry_size_sol=entry_size_sol,
+        trigger_direction="AT_OR_BELOW",
+        created_by="telegram_control_bot",
+    )
+    session.add(trigger)
+    session.flush()
+    return ControlResult(
+        True,
+        "\n".join(
+            [
+                "Manual BUY trigger created",
+                f"Trigger: #{trigger.id}",
+                f"CA: {short_token_address(token_address)}",
+                f"Target MC: {format_usd(target_market_cap_usd)}",
+                f"Size: {entry_size_sol:g} SOL",
+            ]
+        ),
+    )
+
+
+def create_manual_sell_trigger(
+    session: Session,
+    token_address: str,
+    *,
+    target_market_cap_usd: float,
+    sell_ratio: float = 100,
+) -> ControlResult:
+    if sell_ratio != 100:
+        return ControlResult(False, "Conditional manual SELL currently supports all/100% only.")
+    trigger = ManualLiveTrigger(
+        side="SELL",
+        token_address=token_address,
+        status="WATCHING",
+        target_market_cap_usd=target_market_cap_usd,
+        sell_ratio=sell_ratio,
+        trigger_direction="AT_OR_ABOVE",
+        created_by="telegram_control_bot",
+    )
+    session.add(trigger)
+    session.flush()
+    return ControlResult(
+        True,
+        "\n".join(
+            [
+                "Manual SELL trigger created",
+                f"Trigger: #{trigger.id}",
+                f"CA: {short_token_address(token_address)}",
+                f"Target MC: {format_usd(target_market_cap_usd)}",
+                f"Sell: {sell_ratio:g}%",
+            ]
+        ),
+    )
+
+
+def list_manual_triggers(session: Session) -> str:
+    triggers = session.scalars(
+        select(ManualLiveTrigger)
+        .where(ManualLiveTrigger.status == "WATCHING")
+        .order_by(ManualLiveTrigger.created_at.asc(), ManualLiveTrigger.id.asc())
+    ).all()
+    if not triggers:
+        return "Manual triggers: none"
+    lines = [f"Manual triggers: {len(triggers)}"]
+    for trigger in triggers:
+        action = (
+            f"BUY {trigger.entry_size_sol:g} SOL"
+            if trigger.side == "BUY"
+            else f"SELL {trigger.sell_ratio or 100:g}%"
+        )
+        direction = "<=" if trigger.trigger_direction == "AT_OR_BELOW" else ">="
+        lines.extend(
+            [
+                "",
+                f"#{trigger.id} {action}",
+                f"CA: {short_token_address(trigger.token_address)}",
+                f"MC: {direction} {format_usd(trigger.target_market_cap_usd)}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def cancel_manual_trigger(session: Session, trigger_id: int) -> ControlResult:
+    trigger = session.get(ManualLiveTrigger, trigger_id)
+    if trigger is None:
+        return ControlResult(False, f"Trigger #{trigger_id} not found.")
+    if trigger.status != "WATCHING":
+        return ControlResult(False, f"Trigger #{trigger_id} is {trigger.status}.")
+    trigger.status = "CANCELLED"
+    trigger.decision_reason = "cancelled_by_telegram_control_bot"
+    return ControlResult(True, f"Manual trigger #{trigger_id} cancelled.")
 
 
 def update_take_profit(session: Session, position_id: int, pct: float) -> ControlResult:

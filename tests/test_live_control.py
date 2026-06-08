@@ -4,8 +4,18 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from data_sources.types import TokenMarketData
-from db.models import Base, LiveOrder, LivePosition, TokenCallEvent, TokenMarketSnapshot
+from db.models import (
+    Base,
+    LiveOrder,
+    LivePosition,
+    ManualLiveTrigger,
+    TokenCallEvent,
+    TokenMarketSnapshot,
+)
 from live.control import (
+    cancel_manual_trigger,
+    create_manual_buy_trigger,
+    create_manual_sell_trigger,
     get_position_detail,
     list_live_positions,
     live_entry_paused,
@@ -15,7 +25,7 @@ from live.control import (
     update_stop_loss,
     update_take_profit,
 )
-from live.control_bot import _parse_token_address_arg
+from live.control_bot import _parse_market_cap_arg, _parse_token_address_arg
 from live.engine import LiveTradingEngine
 
 TOKEN = "5s7tf6ih2CEZf7ZPNkJAtcknAq9DL5GsWHMMT3Jdpump"
@@ -212,3 +222,41 @@ def test_manual_buy_rejects_active_position_for_same_token() -> None:
 def test_control_bot_parses_manual_buy_token_address() -> None:
     assert _parse_token_address_arg(["/buy", TOKEN], 1) == TOKEN
     assert _parse_token_address_arg(["/buy", f"https://dexscreener.com/solana/{TOKEN}"], 1) == TOKEN
+
+
+def test_manual_market_cap_triggers_can_be_created_and_cancelled() -> None:
+    session = make_session()
+
+    buy = create_manual_buy_trigger(
+        session,
+        TOKEN,
+        target_market_cap_usd=300_000,
+        entry_size_sol=0.5,
+    )
+    sell = create_manual_sell_trigger(
+        session,
+        TOKEN,
+        target_market_cap_usd=500_000,
+        sell_ratio=100,
+    )
+
+    assert buy.ok is True
+    assert sell.ok is True
+    triggers = session.scalars(select(ManualLiveTrigger).order_by(ManualLiveTrigger.id)).all()
+    assert [(trigger.side, trigger.trigger_direction) for trigger in triggers] == [
+        ("BUY", "AT_OR_BELOW"),
+        ("SELL", "AT_OR_ABOVE"),
+    ]
+    assert triggers[0].entry_size_sol == 0.5
+    assert triggers[1].sell_ratio == 100
+
+    cancelled = cancel_manual_trigger(session, triggers[0].id)
+
+    assert cancelled.ok is True
+    assert triggers[0].status == "CANCELLED"
+
+
+def test_control_bot_parses_market_cap_suffixes() -> None:
+    assert _parse_market_cap_arg(["/buy", TOKEN, "300k"], 2) == 300_000
+    assert _parse_market_cap_arg(["/buy", TOKEN, "1.5m"], 2) == 1_500_000
+    assert _parse_market_cap_arg(["/buy", TOKEN, "$2,000,000"], 2) == 2_000_000

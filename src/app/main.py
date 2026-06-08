@@ -21,6 +21,7 @@ def main() -> None:
             "position-refresh",
             "live-position-refresh",
             "live-entry-setup-refresh",
+            "manual-live-trigger-refresh",
             "live-order-execute",
             "live-control-bot",
             "closed-position-refresh",
@@ -79,6 +80,10 @@ def main() -> None:
         count = pipeline.refresh_live_entry_setups(force=True)
         print(f"Evaluated {count} live entry setups.")
         return
+    if args.mode == "manual-live-trigger-refresh":
+        count = pipeline.refresh_manual_live_triggers()
+        print(f"Evaluated {count} manual live triggers.")
+        return
     if args.mode == "live-order-execute":
         count = pipeline.execute_live_orders()
         print(f"Executed {count} live orders.")
@@ -88,6 +93,7 @@ def main() -> None:
         pipeline.refresh_open_events(limit=args.limit)
         pipeline.refresh_open_positions()
         pipeline.refresh_live_entry_setups()
+        pipeline.refresh_manual_live_triggers()
         pipeline.refresh_live_positions()
         pipeline.execute_live_orders()
         pipeline.refresh_closed_positions()

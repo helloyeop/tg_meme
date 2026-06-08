@@ -7,8 +7,12 @@ import httpx
 from app.settings import get_settings
 from db.session import get_session, init_db
 from live.control import (
+    cancel_manual_trigger,
+    create_manual_buy_trigger,
+    create_manual_sell_trigger,
     get_position_detail,
     list_live_positions,
+    list_manual_triggers,
     set_live_entry_paused,
     stage_manual_buy,
     stage_manual_sell,
@@ -30,7 +34,11 @@ Live control commands
 /pause_live - pause new live entries
 /resume_live - resume new live entries
 /buy <CA> - stage a manual BUY using the same live TP/SL rules
+/buy <CA> <marketcap> <SOL> - watch and BUY at or below market cap, e.g. /buy CA 300k 0.5
 /sell <id> - stage a full manual SELL
+/sell <CA> <marketcap> [all] - watch and SELL at or above market cap
+/triggers - list watching manual market-cap triggers
+/cancel_trigger <id> - cancel a manual market-cap trigger
 /tp <id> <pct> - set take-profit percent, e.g. /tp 5 20
 /sl <id> <pct> - set stop-loss percent, e.g. /sl 5 -70
 """.strip()
@@ -138,16 +146,51 @@ class LiveControlBot:
             if command == "/buy":
                 token_address = _parse_token_address_arg(parts, 1)
                 with get_session() as session:
-                    result = stage_manual_buy(session, token_address)
+                    if len(parts) >= 4:
+                        result = create_manual_buy_trigger(
+                            session,
+                            token_address,
+                            target_market_cap_usd=_parse_market_cap_arg(parts, 2),
+                            entry_size_sol=_parse_float_arg(parts, 3, "entry size SOL"),
+                        )
+                    else:
+                        result = stage_manual_buy(session, token_address)
                     if result.ok:
                         session.commit()
                     else:
                         session.rollback()
                     return result.message
             if command == "/sell":
+                if len(parts) >= 3 and not _looks_like_int(parts[1]):
+                    token_address = _parse_token_address_arg(parts, 1)
+                    sell_ratio = _parse_sell_ratio_arg(parts, 3) if len(parts) >= 4 else 100
+                    with get_session() as session:
+                        result = create_manual_sell_trigger(
+                            session,
+                            token_address,
+                            target_market_cap_usd=_parse_market_cap_arg(parts, 2),
+                            sell_ratio=sell_ratio,
+                        )
+                        if result.ok:
+                            session.commit()
+                        else:
+                            session.rollback()
+                        return result.message
                 position_id = _parse_int_arg(parts, 1, "position id")
                 with get_session() as session:
                     result = stage_manual_sell(session, position_id)
+                    if result.ok:
+                        session.commit()
+                    else:
+                        session.rollback()
+                    return result.message
+            if command == "/triggers":
+                with get_session() as session:
+                    return list_manual_triggers(session)
+            if command == "/cancel_trigger":
+                trigger_id = _parse_int_arg(parts, 1, "trigger id")
+                with get_session() as session:
+                    result = cancel_manual_trigger(session, trigger_id)
                     if result.ok:
                         session.commit()
                     else:
@@ -209,6 +252,42 @@ def _parse_float_arg(parts: list[str], index: int, label: str) -> float:
         raise ValueError(f"Invalid {label}: {parts[index]}") from exc
 
 
+def _parse_market_cap_arg(parts: list[str], index: int) -> float:
+    if len(parts) <= index:
+        raise ValueError("Missing market cap.")
+    raw = parts[index].strip().lower().replace("$", "").replace(",", "")
+    multiplier = 1.0
+    if raw.endswith("k"):
+        multiplier = 1_000
+        raw = raw[:-1]
+    elif raw.endswith("m"):
+        multiplier = 1_000_000
+        raw = raw[:-1]
+    elif raw.endswith("b"):
+        multiplier = 1_000_000_000
+        raw = raw[:-1]
+    try:
+        value = float(raw) * multiplier
+    except ValueError as exc:
+        raise ValueError(f"Invalid market cap: {parts[index]}") from exc
+    if value <= 0:
+        raise ValueError("Market cap must be positive.")
+    return value
+
+
+def _parse_sell_ratio_arg(parts: list[str], index: int) -> float:
+    raw = parts[index].strip().lower().rstrip("%")
+    if raw == "all":
+        return 100
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid sell ratio: {parts[index]}") from exc
+    if value <= 0 or value > 100:
+        raise ValueError("Sell ratio must be between 0 and 100.")
+    return value
+
+
 def _parse_token_address_arg(parts: list[str], index: int) -> str:
     if len(parts) <= index:
         raise ValueError("Missing Solana token address.")
@@ -222,6 +301,14 @@ def _parse_token_address_arg(parts: list[str], index: int) -> str:
         if is_valid_solana_address(identifier):
             return identifier
     raise ValueError(f"Invalid Solana token address: {parts[index]}")
+
+
+def _looks_like_int(value: str) -> bool:
+    try:
+        int(value)
+    except ValueError:
+        return False
+    return True
 
 
 def run_live_control_bot() -> None:

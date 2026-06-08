@@ -40,6 +40,7 @@ class LiveTradingEngine:
         market_data: TokenMarketData | None,
         paper_opened: bool,
         round_trip_recovery_pct: float | None = None,
+        entry_size_sol: float | None = None,
         now: datetime | None = None,
     ) -> LiveDecision:
         now = now or datetime.utcnow()
@@ -58,7 +59,8 @@ class LiveTradingEngine:
         if self._active_position_count(session) >= self.live.get("max_open_positions", 1):
             return LiveDecision(False, "live_max_open_positions_reached")
 
-        entry_size_sol = self._entry_size_sol(event)
+        if entry_size_sol is None:
+            entry_size_sol = self._entry_size_sol(event)
         max_entry_size_sol = self.live.get("max_entry_size_sol", 0.05)
         if entry_size_sol > max_entry_size_sol:
             return LiveDecision(False, "live_entry_size_exceeds_cap")
