@@ -942,6 +942,30 @@ class MessagePipeline:
         entry_input = int(
             position.entry_input_lamports or position.entry_size_sol * LAMPORTS_PER_SOL
         )
+        price_impact = _float_or_none(quote.get("price_impact"))
+        max_price_impact = self.live.live.get("max_exit_quote_price_impact_pct", 25)
+        if (
+            max_price_impact is not None
+            and price_impact is not None
+            and abs(price_impact) > float(max_price_impact)
+        ):
+            self._store_live_quote_audit(
+                session,
+                event_id=position.event_id,
+                position_id=position.id,
+                token_address=position.token_address,
+                quote_type="EXIT_SELL",
+                status="REJECTED",
+                input_amount=int(position.token_amount_raw),
+                output_amount=output_amount,
+                recovery_pct=100 * output_amount / entry_input,
+                quote=quote,
+                reason=(
+                    "exit_quote_price_impact_high:"
+                    f"{price_impact:.2f}>{float(max_price_impact):.2f}"
+                ),
+            )
+            return None
         self._store_live_quote_audit(
             session,
             event_id=position.event_id,
@@ -1067,3 +1091,12 @@ class MessagePipeline:
                 session.commit()
                 logger.exception("Failed to refresh closed positions for %s", token_addresses)
                 return 0
+
+
+def _float_or_none(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

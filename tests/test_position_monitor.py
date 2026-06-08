@@ -6,7 +6,15 @@ from sqlalchemy.orm import sessionmaker
 
 from app.pipeline import MessagePipeline
 from data_sources.types import TokenMarketData
-from db.models import Base, PaperPosition, PaperTradeFill, TokenCallEvent, TokenMarketSnapshot
+from db.models import (
+    Base,
+    LivePosition,
+    LiveQuoteAudit,
+    PaperPosition,
+    PaperTradeFill,
+    TokenCallEvent,
+    TokenMarketSnapshot,
+)
 
 
 class StubDexScreener:
@@ -198,3 +206,58 @@ def test_closed_monitor_fetches_slow_post_exit_snapshot_when_due(monkeypatch) ->
         assert dexscreener.requests == [["mint"]]
         assert snapshot is not None and snapshot.source == "dexscreener_post_exit"
         assert position is not None and position.post_exit_latest_market_cap_usd == 70000
+
+
+def test_live_sell_quote_with_absurd_price_impact_is_rejected() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    test_session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with test_session() as session:
+        event = TokenCallEvent(
+            channel_id="manual_live_control:test",
+            token_address="mint",
+            first_seen_time=datetime.utcnow(),
+        )
+        session.add(event)
+        session.flush()
+        position = LivePosition(
+            event_id=event.id,
+            channel_id=event.channel_id,
+            token_address="mint",
+            status="OPEN",
+            entry_time=datetime.utcnow(),
+            entry_market_cap_usd=100_000,
+            entry_size_sol=0.5,
+            target_profit_pct=30,
+            target_market_cap_usd=130_000,
+            stop_loss_pct=-35,
+            stop_loss_market_cap_usd=65_000,
+            highest_market_cap_usd=150_000,
+            token_amount_raw="1000",
+            entry_input_lamports="500000000",
+        )
+        session.add(position)
+        session.flush()
+
+        class FakeSigner:
+            def quote_sell(self, *, token_address: str, amount: int) -> dict:
+                return {
+                    "out_amount": "863355435665",
+                    "price_impact": 221_939.15,
+                    "slippage_bps": 0,
+                    "fee_bps": 10,
+                }
+
+        pipeline = MessagePipeline()
+        pipeline.live.live = {"max_exit_quote_price_impact_pct": 25}
+        pipeline.live_executor.signer = FakeSigner()
+
+        output = pipeline._sell_quote_output_lamports(session, position=position)
+        session.flush()
+
+        audit = session.scalar(select(LiveQuoteAudit))
+        assert output is None
+        assert audit is not None
+        assert audit.status == "REJECTED"
+        assert audit.output_amount_raw == "863355435665"
+        assert audit.reason.startswith("exit_quote_price_impact_high")
