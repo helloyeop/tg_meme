@@ -34,7 +34,7 @@ Live control commands
 /pause_live - pause new live entries
 /resume_live - resume new live entries
 /buy <CA> - stage a manual BUY using the same live TP/SL rules
-/buy <CA> <marketcap> <SOL> - watch and BUY at or below market cap, e.g. /buy CA 300k 0.5
+/buy <CA> <marketcap> [SOL] - watch and BUY at or below market cap, e.g. /buy CA 300k 0.5sol
 /sell <id> - stage a full manual SELL
 /sell <CA> <marketcap> [all] - watch and SELL at or above market cap
 /triggers - list watching manual market-cap triggers
