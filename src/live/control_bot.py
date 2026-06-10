@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from alerts.bot import short_token_address
 from app.settings import get_settings
 from db.session import get_session, init_db
 from live.control import (
@@ -31,6 +32,7 @@ HELP_TEXT = """
 Live control commands
 /live - list active live positions
 /pos <id> - show live position details
+/balance - show live wallet SOL balance
 /pause_live - pause new live entries
 /resume_live - resume new live entries
 /buy <CA> - stage a manual BUY using the same live TP/SL rules
@@ -133,6 +135,8 @@ class LiveControlBot:
                 position_id = _parse_int_arg(parts, 1, "position id")
                 with get_session() as session:
                     return get_position_detail(session, position_id).message
+            if command == "/balance":
+                return get_live_balance(self.settings)
             if command == "/pause_live":
                 with get_session() as session:
                     set_live_entry_paused(session, True, "telegram_control_bot")
@@ -333,6 +337,38 @@ def _looks_like_int(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def get_live_balance(settings) -> str:
+    if settings.live_execution_adapter != "signer_service":
+        return "Live signer is disabled."
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(f"{settings.live_signer_base_url.rstrip('/')}/readiness")
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        return f"Live balance unavailable: {exc}"
+    return _format_live_balance(payload, settings)
+
+
+def _format_live_balance(payload: dict, settings) -> str:
+    balance_sol = float(payload.get("balance_sol") or 0)
+    fee_reserve_sol = float(payload.get("fee_reserve_sol") or settings.live_fee_reserve_sol)
+    spendable_sol = max(balance_sol - fee_reserve_sol, 0)
+    live = settings.load_strategy_config().get("live", {})
+    lines = [
+        "Live wallet balance",
+        f"Status: {payload.get('status') or 'unknown'}",
+        f"Wallet: {short_token_address(str(payload.get('wallet') or 'unknown'))}",
+        f"Balance: {balance_sol:.4f} SOL",
+        f"Fee reserve: {fee_reserve_sol:.4f} SOL",
+        f"Spendable approx: {spendable_sol:.4f} SOL",
+        f"Default entry: {float(live.get('entry_size_sol', 0)):.4g} SOL",
+        f"Max entry: {float(live.get('max_entry_size_sol', 0)):.4g} SOL",
+        f"Daily buy cap: {float(live.get('daily_max_buy_sol', 0)):.4g} SOL",
+    ]
+    return "\n".join(lines)
 
 
 def run_live_control_bot() -> None:

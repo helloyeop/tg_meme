@@ -28,9 +28,11 @@ from live.control import (
 )
 from live.control_bot import (
     LiveControlBot,
+    _format_live_balance,
     _parse_market_cap_arg,
     _parse_sol_arg,
     _parse_token_address_arg,
+    get_live_balance,
 )
 from live.engine import LiveTradingEngine
 
@@ -49,6 +51,8 @@ class LiveSettings:
     live_order_staging_enabled = True
     live_wallet_public_key = "wallet"
     live_execution_adapter = "disabled"
+    live_signer_base_url = "http://signer:8787"
+    live_fee_reserve_sol = 0.05
     jupiter_api_key = None
     jupiter_swap_base_url = "https://api.jup.ag/swap/v2"
 
@@ -312,3 +316,30 @@ def test_control_bot_creates_conditional_buy_with_sol_suffix(monkeypatch) -> Non
     assert "Manual BUY trigger created" in response
     assert trigger is not None
     assert trigger.entry_size_sol == 0.5
+
+
+def test_control_bot_balance_reports_disabled_signer() -> None:
+    response = get_live_balance(LiveSettings())
+
+    assert response == "Live signer is disabled."
+
+
+def test_format_live_balance_includes_caps() -> None:
+    settings = LiveSettings()
+    settings.live_execution_adapter = "signer_service"
+    response = _format_live_balance(
+        {
+            "status": "ready",
+            "wallet": TOKEN,
+            "balance_sol": 1.234567,
+            "fee_reserve_sol": 0.05,
+        },
+        settings,
+    )
+
+    assert "Live wallet balance" in response
+    assert "Status: ready" in response
+    assert "Wallet: 5s7tf6...Jdpump" in response
+    assert "Balance: 1.2346 SOL" in response
+    assert "Spendable approx: 1.1846 SOL" in response
+    assert "Max entry: 0.05 SOL" in response
