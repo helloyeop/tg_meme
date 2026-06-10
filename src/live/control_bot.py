@@ -146,12 +146,16 @@ class LiveControlBot:
             if command == "/buy":
                 token_address = _parse_token_address_arg(parts, 1)
                 with get_session() as session:
-                    if len(parts) >= 4:
+                    if len(parts) >= 3:
                         result = create_manual_buy_trigger(
                             session,
                             token_address,
                             target_market_cap_usd=_parse_market_cap_arg(parts, 2),
-                            entry_size_sol=_parse_float_arg(parts, 3, "entry size SOL"),
+                            entry_size_sol=(
+                                _parse_sol_arg(parts, 3)
+                                if len(parts) >= 4
+                                else _default_live_entry_size_sol(self.settings)
+                            ),
                         )
                     else:
                         result = stage_manual_buy(session, token_address)
@@ -250,6 +254,26 @@ def _parse_float_arg(parts: list[str], index: int, label: str) -> float:
         return float(parts[index])
     except ValueError as exc:
         raise ValueError(f"Invalid {label}: {parts[index]}") from exc
+
+
+def _parse_sol_arg(parts: list[str], index: int) -> float:
+    if len(parts) <= index:
+        raise ValueError("Missing entry size SOL.")
+    raw = parts[index].strip().lower()
+    if raw.endswith("sol"):
+        raw = raw[:-3].strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid entry size SOL: {parts[index]}") from exc
+    if value <= 0:
+        raise ValueError("Entry size SOL must be positive.")
+    return value
+
+
+def _default_live_entry_size_sol(settings) -> float:
+    live = settings.load_strategy_config().get("live", {})
+    return float(live.get("entry_size_sol", 0.5))
 
 
 def _parse_market_cap_arg(parts: list[str], index: int) -> float:

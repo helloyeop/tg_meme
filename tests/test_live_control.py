@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import create_engine, select
@@ -25,7 +26,12 @@ from live.control import (
     update_stop_loss,
     update_take_profit,
 )
-from live.control_bot import _parse_market_cap_arg, _parse_token_address_arg
+from live.control_bot import (
+    LiveControlBot,
+    _parse_market_cap_arg,
+    _parse_sol_arg,
+    _parse_token_address_arg,
+)
 from live.engine import LiveTradingEngine
 
 TOKEN = "5s7tf6ih2CEZf7ZPNkJAtcknAq9DL5GsWHMMT3Jdpump"
@@ -38,11 +44,17 @@ def make_session():
 
 
 class LiveSettings:
+    telegram_alert_bot_token = "token"
+    telegram_alert_chat_id = "chat"
     live_order_staging_enabled = True
     live_wallet_public_key = "wallet"
     live_execution_adapter = "disabled"
     jupiter_api_key = None
     jupiter_swap_base_url = "https://api.jup.ag/swap/v2"
+
+    @staticmethod
+    def load_strategy_config():
+        return live_strategy()
 
 
 def live_strategy():
@@ -260,3 +272,43 @@ def test_control_bot_parses_market_cap_suffixes() -> None:
     assert _parse_market_cap_arg(["/buy", TOKEN, "300k"], 2) == 300_000
     assert _parse_market_cap_arg(["/buy", TOKEN, "1.5m"], 2) == 1_500_000
     assert _parse_market_cap_arg(["/buy", TOKEN, "$2,000,000"], 2) == 2_000_000
+
+
+def test_control_bot_parses_sol_suffixes() -> None:
+    assert _parse_sol_arg(["/buy", TOKEN, "300k", "1"], 3) == 1
+    assert _parse_sol_arg(["/buy", TOKEN, "300k", "0.5sol"], 3) == 0.5
+
+
+def test_control_bot_creates_conditional_buy_with_default_size(monkeypatch) -> None:
+    session = make_session()
+
+    @contextmanager
+    def fake_get_session():
+        yield session
+
+    monkeypatch.setattr("live.control_bot.get_session", fake_get_session)
+    response = LiveControlBot(settings=LiveSettings())._execute_command(f"/buy {TOKEN} 300k")
+
+    trigger = session.scalar(select(ManualLiveTrigger))
+    assert "Manual BUY trigger created" in response
+    assert trigger is not None
+    assert trigger.target_market_cap_usd == 300_000
+    assert trigger.entry_size_sol == 0.05
+
+
+def test_control_bot_creates_conditional_buy_with_sol_suffix(monkeypatch) -> None:
+    session = make_session()
+
+    @contextmanager
+    def fake_get_session():
+        yield session
+
+    monkeypatch.setattr("live.control_bot.get_session", fake_get_session)
+    response = LiveControlBot(settings=LiveSettings())._execute_command(
+        f"/buy {TOKEN} 300k 0.5sol"
+    )
+
+    trigger = session.scalar(select(ManualLiveTrigger))
+    assert "Manual BUY trigger created" in response
+    assert trigger is not None
+    assert trigger.entry_size_sol == 0.5

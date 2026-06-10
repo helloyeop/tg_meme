@@ -1,4 +1,5 @@
 import argparse
+import logging
 import time
 
 from app.logging_config import configure_logging
@@ -6,6 +7,8 @@ from app.pipeline import MessagePipeline
 from app.settings import get_settings
 from db.session import init_db
 from telegram.collector import TelegramCollector
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -89,15 +92,28 @@ def main() -> None:
         print(f"Executed {count} live orders.")
         return
     while True:
-        pipeline.process_unanalyzed_messages(limit=args.limit)
-        pipeline.refresh_open_events(limit=args.limit)
-        pipeline.refresh_open_positions()
-        pipeline.refresh_live_entry_setups()
-        pipeline.refresh_manual_live_triggers()
-        pipeline.refresh_live_positions()
-        pipeline.execute_live_orders()
-        pipeline.refresh_closed_positions()
+        _run_pipeline_step(
+            "process_unanalyzed_messages",
+            lambda: pipeline.process_unanalyzed_messages(limit=args.limit),
+        )
+        _run_pipeline_step(
+            "refresh_open_events",
+            lambda: pipeline.refresh_open_events(limit=args.limit),
+        )
+        _run_pipeline_step("refresh_open_positions", pipeline.refresh_open_positions)
+        _run_pipeline_step("refresh_live_entry_setups", pipeline.refresh_live_entry_setups)
+        _run_pipeline_step("refresh_manual_live_triggers", pipeline.refresh_manual_live_triggers)
+        _run_pipeline_step("refresh_live_positions", pipeline.refresh_live_positions)
+        _run_pipeline_step("execute_live_orders", pipeline.execute_live_orders)
+        _run_pipeline_step("refresh_closed_positions", pipeline.refresh_closed_positions)
         time.sleep(min(args.poll_seconds, get_settings().paper_fast_monitor_seconds))
+
+
+def _run_pipeline_step(name: str, func) -> None:
+    try:
+        func()
+    except Exception:
+        logger.exception("Pipeline step failed: %s", name)
 
 
 if __name__ == "__main__":
