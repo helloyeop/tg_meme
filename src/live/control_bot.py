@@ -35,7 +35,7 @@ Live control commands
 /balance - show live wallet SOL balance
 /pause_live - pause new live entries
 /resume_live - resume new live entries
-/buy <CA> - stage a manual BUY using the same live TP/SL rules
+/buy <CA> [SOL] - stage a manual BUY using the same live TP/SL rules
 /buy <CA> <marketcap> [SOL] - watch and BUY at or below market cap, e.g. /buy CA 300k 0.5sol
 /sell <id> - stage a full manual SELL
 /sell <CA> <marketcap> [all] - watch and SELL at or above market cap
@@ -150,7 +150,13 @@ class LiveControlBot:
             if command == "/buy":
                 token_address = _parse_token_address_arg(parts, 1)
                 with get_session() as session:
-                    if len(parts) >= 3:
+                    if len(parts) == 3 and _looks_like_sol_arg(parts[2]):
+                        result = stage_manual_buy(
+                            session,
+                            token_address,
+                            entry_size_sol=_parse_sol_arg(parts, 2),
+                        )
+                    elif len(parts) >= 3:
                         result = create_manual_buy_trigger(
                             session,
                             token_address,
@@ -273,6 +279,16 @@ def _parse_sol_arg(parts: list[str], index: int) -> float:
     if value <= 0:
         raise ValueError("Entry size SOL must be positive.")
     return value
+
+
+def _looks_like_sol_arg(value: str) -> bool:
+    raw = value.strip().lower()
+    if not raw.endswith("sol"):
+        return False
+    try:
+        return float(raw[:-3].strip()) > 0
+    except ValueError:
+        return False
 
 
 def _default_live_entry_size_sol(settings) -> float:

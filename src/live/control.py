@@ -121,6 +121,7 @@ def stage_manual_buy(
     *,
     data_sources: DataSourceAggregator | None = None,
     live=None,
+    entry_size_sol: float | None = None,
     now: datetime | None = None,
 ) -> ControlResult:
     from live.engine import LiveTradingEngine
@@ -166,7 +167,12 @@ def stage_manual_buy(
 
     live = live or LiveTradingEngine()
     try:
-        recovery_pct = _manual_entry_round_trip_recovery_pct(live, token_address, event)
+        recovery_pct = _manual_entry_round_trip_recovery_pct(
+            live,
+            token_address,
+            event,
+            entry_size_sol=entry_size_sol,
+        )
     except Exception as exc:
         return ControlResult(False, f"Manual BUY rejected: round_trip_quote_failed:{exc}")
     decision = live.maybe_stage_entry(
@@ -175,6 +181,7 @@ def stage_manual_buy(
         market_data=market_data,
         paper_opened=True,
         round_trip_recovery_pct=recovery_pct,
+        entry_size_sol=entry_size_sol,
         now=now,
     )
     if not decision.staged:
@@ -419,6 +426,8 @@ def _manual_entry_round_trip_recovery_pct(
     live,
     token_address: str,
     event: TokenCallEvent,
+    *,
+    entry_size_sol: float | None = None,
 ) -> float | None:
     if not live.live.get("require_entry_round_trip_quote", False):
         return None
@@ -428,7 +437,9 @@ def _manual_entry_round_trip_recovery_pct(
     from live.engine import LAMPORTS_PER_SOL
     from live.execution import LiveOrderExecutor
 
-    amount = int(live._entry_size_sol(event) * LAMPORTS_PER_SOL)
+    if entry_size_sol is None:
+        entry_size_sol = live._entry_size_sol(event)
+    amount = int(entry_size_sol * LAMPORTS_PER_SOL)
     quote = LiveOrderExecutor(settings=settings).signer.quote_buy_round_trip(
         token_address=token_address,
         amount=amount,

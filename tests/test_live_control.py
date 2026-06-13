@@ -29,6 +29,7 @@ from live.control import (
 from live.control_bot import (
     LiveControlBot,
     _format_live_balance,
+    _looks_like_sol_arg,
     _parse_market_cap_arg,
     _parse_sol_arg,
     _parse_token_address_arg,
@@ -217,6 +218,29 @@ def test_manual_buy_stages_live_buy_with_existing_tp_sl_rules() -> None:
     assert order.reason == "signal_entry"
 
 
+def test_manual_buy_can_override_entry_size() -> None:
+    session = make_session()
+    strategy = live_strategy()
+    strategy["live"]["max_open_positions"] = 3
+    strategy["live"]["max_entry_size_sol"] = 2
+    live = LiveTradingEngine(strategy, LiveSettings())
+
+    result = stage_manual_buy(
+        session,
+        TOKEN,
+        data_sources=FakeDataSources(600_000),
+        live=live,
+        entry_size_sol=1,
+        now=datetime(2026, 6, 13, 12, 0, 0),
+    )
+
+    assert result.ok is True
+    position = session.scalar(select(LivePosition))
+    order = session.scalar(select(LiveOrder))
+    assert position.entry_size_sol == 1
+    assert order.requested_size_sol == 1
+
+
 def test_manual_buy_rejects_active_position_for_same_token() -> None:
     session = make_session()
     position = add_live_position(session)
@@ -281,6 +305,8 @@ def test_control_bot_parses_market_cap_suffixes() -> None:
 def test_control_bot_parses_sol_suffixes() -> None:
     assert _parse_sol_arg(["/buy", TOKEN, "300k", "1"], 3) == 1
     assert _parse_sol_arg(["/buy", TOKEN, "300k", "0.5sol"], 3) == 0.5
+    assert _looks_like_sol_arg("1sol") is True
+    assert _looks_like_sol_arg("3000k") is False
 
 
 def test_control_bot_creates_conditional_buy_with_default_size(monkeypatch) -> None:
@@ -316,6 +342,54 @@ def test_control_bot_creates_conditional_buy_with_sol_suffix(monkeypatch) -> Non
     assert "Manual BUY trigger created" in response
     assert trigger is not None
     assert trigger.entry_size_sol == 0.5
+
+
+def test_control_bot_creates_conditional_buy_with_large_k_market_cap(
+    monkeypatch,
+) -> None:
+    session = make_session()
+
+    @contextmanager
+    def fake_get_session():
+        yield session
+
+    monkeypatch.setattr("live.control_bot.get_session", fake_get_session)
+    response = LiveControlBot(settings=LiveSettings())._execute_command(
+        f"/buy {TOKEN} 3000k 1sol"
+    )
+
+    trigger = session.scalar(select(ManualLiveTrigger))
+    assert "Manual BUY trigger created" in response
+    assert trigger is not None
+    assert trigger.target_market_cap_usd == 3_000_000
+    assert trigger.entry_size_sol == 1
+
+
+def test_control_bot_stages_immediate_buy_with_sol_suffix(monkeypatch) -> None:
+    session = make_session()
+
+    @contextmanager
+    def fake_get_session():
+        yield session
+
+    monkeypatch.setattr("live.control_bot.get_session", fake_get_session)
+    monkeypatch.setattr("live.control.DataSourceAggregator", lambda: FakeDataSources(600_000))
+    strategy = live_strategy()
+    strategy["live"]["max_open_positions"] = 3
+    strategy["live"]["max_entry_size_sol"] = 2
+    monkeypatch.setattr(
+        "live.engine.LiveTradingEngine",
+        lambda: LiveTradingEngine(strategy, LiveSettings()),
+    )
+    response = LiveControlBot(settings=LiveSettings())._execute_command(f"/buy {TOKEN} 1sol")
+
+    position = session.scalar(select(LivePosition))
+    order = session.scalar(select(LiveOrder))
+    assert "Manual BUY staged" in response
+    assert position is not None
+    assert position.entry_size_sol == 1
+    assert order is not None
+    assert order.requested_size_sol == 1
 
 
 def test_control_bot_balance_reports_disabled_signer() -> None:
